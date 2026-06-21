@@ -532,6 +532,60 @@
       cursor: crosshair;
     }
 
+    .kline-selection-line {
+      stroke: var(--blue);
+      stroke-width: 1.4;
+      stroke-dasharray: 5 4;
+      pointer-events: none;
+    }
+
+    .kline-selection-line.end {
+      stroke: var(--amber);
+    }
+
+    .kline-selection-connector {
+      stroke: #475569;
+      stroke-width: 1.6;
+      stroke-dasharray: 3 4;
+      pointer-events: none;
+    }
+
+    .kline-selection-marker {
+      fill: #fff;
+      stroke: var(--blue);
+      stroke-width: 2.4;
+      pointer-events: none;
+    }
+
+    .kline-selection-marker.end {
+      stroke: var(--amber);
+    }
+
+    .kline-selection-tag {
+      fill: var(--axis);
+      font-size: 12px;
+      font-weight: 800;
+      pointer-events: none;
+    }
+
+    .kline-selection-result-bg {
+      fill: #fff;
+      stroke: var(--line);
+      stroke-width: 1;
+      pointer-events: none;
+    }
+
+    .kline-selection-result {
+      fill: var(--red);
+      font-size: 12px;
+      font-weight: 800;
+      pointer-events: none;
+    }
+
+    .kline-selection-result.down {
+      fill: var(--teal);
+    }
+
     .kline-panel-title {
       fill: var(--axis);
       font-size: 13px;
@@ -733,7 +787,8 @@
       klineGap: 2,
       busy: false,
       selectedCandidate: null,
-      searchTimer: null
+      searchTimer: null,
+      klineSelection: []
     };
 
     const stockList = document.getElementById("stockList");
@@ -756,6 +811,7 @@
     const klineRange = document.getElementById("klineRange");
     const statusNode = document.getElementById("status");
     const tooltip = document.getElementById("tooltip");
+    let klineSelectionLayer = null;
 
     function setStatus(text, isError = false) {
       statusNode.textContent = text || "";
@@ -1097,6 +1153,8 @@
     }
 
     function renderAllKlines(kline, indices) {
+      state.klineSelection = [];
+      klineSelectionLayer = null;
       klineSvg.innerHTML = "";
       klineWrap.querySelector(".kline-empty")?.remove();
 
@@ -1135,6 +1193,7 @@
       const chartWidth = width - margin.left - margin.right;
       const dateIndex = new Map(allDates.map((date, index) => [date, index]));
       const crosshair = createKlineCrosshair(width, height, margin);
+      klineSelectionLayer = createSvg("g", { class: "kline-selection-layer" });
 
       klineSvg.setAttribute("viewBox", `0 0 ${width} ${height}`);
       klineSvg.style.minWidth = `${width}px`;
@@ -1159,6 +1218,7 @@
         });
       });
 
+      klineSvg.appendChild(klineSelectionLayer);
       klineSvg.appendChild(crosshair.group);
     }
 
@@ -1472,6 +1532,48 @@
         showKlineTooltip(event, nearest.item, nearest.changePct, panel.title);
       });
 
+      hitArea.addEventListener("click", event => {
+        if (event.button !== 0) return;
+
+        if (state.klineSelection.length >= 2) {
+          clearKlineSelection();
+          setStatus("已清除K线区间选择");
+          return;
+        }
+
+        const cursor = svgCursorPoint(svgNode, event);
+        if (!cursor) return;
+
+        const cursorX = Math.max(margin.left, Math.min(width - margin.right, cursor.x));
+        const nearestDateIndex = Math.max(
+          0,
+          Math.min(allDates.length - 1, Math.round((cursorX - margin.left - slot / 2) / slot))
+        );
+        const nearest = nearestPanelCandle(panel, nearestDateIndex, dateIndex);
+        if (!nearest) return;
+
+        const close = Number(nearest.item.close);
+        const xCenter = margin.left + slot * dateIndex.get(nearest.item.date) + slot / 2;
+        const point = {
+          panelKey: panel.key,
+          panelTitle: panel.title,
+          item: nearest.item,
+          baseDate: nearest.previous?.date || "",
+          baseClose: Number(nearest.previous?.close),
+          date: nearest.item.date,
+          close,
+          x: xCenter,
+          y: yOffset + yPrice(close),
+          panelTop: yOffset + margin.top,
+          panelBottom: yOffset + volumeBottom,
+          labelTop: yOffset + 30,
+          chartLeft: margin.left,
+          chartRight: width - margin.right
+        };
+
+        handleKlineSelection(point);
+      });
+
       hitArea.addEventListener("mouseleave", () => {
         crosshair.group.setAttribute("visibility", "hidden");
         hideTooltip();
@@ -1506,8 +1608,124 @@
 
       return {
         item: best.item,
+        previous,
         changePct
       };
+    }
+
+    function handleKlineSelection(point) {
+      if (!Number.isFinite(point.close) || point.close <= 0) return;
+      if (!Number.isFinite(point.baseClose) || point.baseClose <= 0) {
+        setStatus(`${point.panelTitle} ${point.date} 缺少前一根K线，无法按起点前一根收盘价计算涨跌幅`, true);
+        return;
+      }
+
+      if (state.klineSelection.length === 1 && state.klineSelection[0].panelKey !== point.panelKey) {
+        state.klineSelection = [point];
+        renderKlineSelection();
+        setStatus(`已选择 ${point.panelTitle} 起点：${point.date}，基准 ${point.baseDate} 收盘 ${formatPrice(point.baseClose)}`);
+        return;
+      }
+
+      state.klineSelection = [...state.klineSelection, point].slice(0, 2);
+      renderKlineSelection();
+
+      if (state.klineSelection.length === 1) {
+        setStatus(`已选择 ${point.panelTitle} 起点：${point.date}，基准 ${point.baseDate} 收盘 ${formatPrice(point.baseClose)}`);
+        return;
+      }
+
+      const [start, end] = state.klineSelection;
+      const returnPct = klineSelectionReturn(start, end);
+      setStatus(`${start.panelTitle} ${start.date} 至 ${end.date} 涨跌幅 ${formatSignedPct(returnPct)}，分母为 ${start.baseDate} 收盘 ${formatPrice(start.baseClose)}`);
+    }
+
+    function clearKlineSelection() {
+      state.klineSelection = [];
+      if (klineSelectionLayer) {
+        klineSelectionLayer.innerHTML = "";
+      }
+    }
+
+    function renderKlineSelection() {
+      if (!klineSelectionLayer) return;
+
+      klineSelectionLayer.innerHTML = "";
+      const points = state.klineSelection;
+      if (!points.length) return;
+
+      if (points.length === 2) {
+        const [start, end] = points;
+        klineSelectionLayer.appendChild(createSvg("line", {
+          class: "kline-selection-connector",
+          x1: start.x,
+          y1: start.y,
+          x2: end.x,
+          y2: end.y
+        }));
+      }
+
+      points.forEach((point, index) => {
+        const isEnd = index === 1;
+        klineSelectionLayer.appendChild(createSvg("line", {
+          class: `kline-selection-line${isEnd ? " end" : ""}`,
+          x1: point.x,
+          y1: point.panelTop,
+          x2: point.x,
+          y2: point.panelBottom
+        }));
+        klineSelectionLayer.appendChild(createSvg("circle", {
+          class: `kline-selection-marker${isEnd ? " end" : ""}`,
+          cx: point.x,
+          cy: point.y,
+          r: 5
+        }));
+        const tag = createSvg("text", {
+          class: "kline-selection-tag",
+          x: point.x + 8,
+          y: Math.max(point.panelTop + 14, point.y - 8)
+        });
+        tag.textContent = isEnd ? "终" : "起";
+        klineSelectionLayer.appendChild(tag);
+      });
+
+      if (points.length !== 2) return;
+
+      const [start, end] = points;
+      const returnPct = klineSelectionReturn(start, end);
+      const labelWidth = 360;
+      const labelHeight = 26;
+      const midX = (start.x + end.x) / 2;
+      const labelX = Math.max(start.chartLeft, Math.min(start.chartRight - labelWidth, midX - labelWidth / 2));
+      const labelY = Math.max(start.labelTop, Math.min(Math.min(start.y, end.y) - 38, start.panelBottom - labelHeight - 8));
+
+      klineSelectionLayer.appendChild(createSvg("rect", {
+        class: "kline-selection-result-bg",
+        x: labelX,
+        y: labelY,
+        width: labelWidth,
+        height: labelHeight,
+        rx: 6
+      }));
+
+      const result = createSvg("text", {
+        class: `kline-selection-result${returnPct < 0 ? " down" : ""}`,
+        x: labelX + labelWidth / 2,
+        y: labelY + 17,
+        "text-anchor": "middle"
+      });
+      result.textContent = `${start.date} → ${end.date} ${formatSignedPct(returnPct)}，基准${start.baseDate}`;
+      klineSelectionLayer.appendChild(result);
+    }
+
+    function klineSelectionReturn(start, end) {
+      return (Number(end.close) / Number(start.baseClose) - 1) * 100;
+    }
+
+    function formatSignedPct(value) {
+      const number = Number(value);
+      if (!Number.isFinite(number)) return "-";
+      return `${number >= 0 ? "+" : ""}${number.toFixed(2)}%`;
     }
 
     function recentKline(kline, months) {
