@@ -20,7 +20,7 @@ DATA_DIR = ROOT / "data"
 STORE_PATH = DATA_DIR / "watchlist.json"
 UNIVERSE_PATH = DATA_DIR / "stock_universe.json"
 
-DEFAULT_STOCK = {"code": "002552", "name": "宝鼎科技"}
+DEFAULT_STOCK = {"code": "002552", "name": "宝鼎科技", "group": ""}
 SERVER_CANDIDATES = [
     ("110.41.147.114", 7709),
     ("8.129.13.54", 7709),
@@ -54,8 +54,17 @@ def load_store() -> dict:
         store = json.load(file)
 
     store.setdefault("stocks", [])
+    changed = False
+    for stock in store["stocks"]:
+        if "group" not in stock:
+            stock["group"] = ""
+            changed = True
+
     if not any(stock.get("code") == DEFAULT_STOCK["code"] for stock in store["stocks"]):
         store["stocks"].insert(0, {**DEFAULT_STOCK, "last_updated": None, "meta": None, "rows": []})
+        changed = True
+
+    if changed:
         save_store(store)
 
     return store
@@ -72,14 +81,31 @@ def save_store(store: dict) -> None:
 def stock_summary(stock: dict) -> dict:
     rows = stock.get("rows") or []
     meta = stock.get("meta") or {}
+    kline = stock.get("kline") or []
+    valid_kline = [
+        item
+        for item in kline
+        if item.get("date") and isinstance(item.get("close"), int | float) and item.get("close")
+    ]
+    last_return_pct = None
+    last_return_date = None
+    if len(valid_kline) >= 2:
+        previous = valid_kline[-2]
+        latest = valid_kline[-1]
+        last_return_pct = round((float(latest["close"]) / float(previous["close"]) - 1) * 100, 2)
+        last_return_date = latest["date"]
+
     return {
         "code": stock.get("code"),
         "name": stock.get("name") or stock.get("code"),
+        "group": stock.get("group") or "",
         "last_updated": stock.get("last_updated"),
         "has_data": bool(rows),
         "row_count": len(rows),
         "end_trade_date": meta.get("end_trade_date"),
         "end_close": meta.get("end_close", meta.get("end_close_qfq")),
+        "last_return_pct": last_return_pct,
+        "last_return_date": last_return_date,
     }
 
 
@@ -485,6 +511,17 @@ class StockAppHandler(SimpleHTTPRequestHandler):
 
         self.send_error_json(HTTPStatus.NOT_FOUND, "接口不存在")
 
+    def do_PATCH(self) -> None:
+        parsed = urlparse(self.path)
+        path = unquote(parsed.path)
+        match = re.fullmatch(r"/api/stocks/(\d{6})", path)
+
+        if not match:
+            self.send_error_json(HTTPStatus.NOT_FOUND, "接口不存在")
+            return
+
+        self.update_stock_info(match.group(1))
+
     def do_DELETE(self) -> None:
         parsed = urlparse(self.path)
         path = unquote(parsed.path)
@@ -527,7 +564,7 @@ class StockAppHandler(SimpleHTTPRequestHandler):
         stock = get_stock(store, code)
 
         if stock is None:
-            stock = {"code": code, "name": name, "last_updated": None, "meta": None, "rows": []}
+            stock = {"code": code, "name": name, "group": "", "last_updated": None, "meta": None, "rows": []}
             store["stocks"].append(stock)
         else:
             stock["name"] = name
@@ -535,12 +572,27 @@ class StockAppHandler(SimpleHTTPRequestHandler):
         save_store(store)
         self.send_json({"stock": stock_summary(stock), "stocks": [stock_summary(item) for item in store["stocks"]]})
 
+    def update_stock_info(self, code: str) -> None:
+        body = self.read_json()
+        store = load_store()
+        stock = get_stock(store, code)
+
+        if stock is None:
+            self.send_error_json(HTTPStatus.NOT_FOUND, "未找到该股票")
+            return
+
+        group = str(body.get("group") or "").strip()[:32]
+        stock["group"] = group
+
+        save_store(store)
+        self.send_json({"stock": stock, "stocks": [stock_summary(item) for item in store["stocks"]]})
+
     def refresh_stock(self, code: str) -> None:
         store = load_store()
         stock = get_stock(store, code)
 
         if stock is None:
-            stock = {"code": code, "name": code, "last_updated": None, "meta": None, "rows": []}
+            stock = {"code": code, "name": code, "group": "", "last_updated": None, "meta": None, "rows": []}
             store["stocks"].append(stock)
 
         try:

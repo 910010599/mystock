@@ -234,6 +234,13 @@
     }
 
     .sidebar {
+      position: sticky;
+      top: 14px;
+      display: grid;
+      grid-template-rows: auto minmax(0, 1fr);
+      height: calc(100vh - 132px);
+      min-height: 520px;
+      max-height: calc(100vh - 28px);
       overflow: hidden;
     }
 
@@ -250,10 +257,75 @@
     }
 
     .stock-list {
-      display: grid;
-      gap: 0;
-      max-height: 620px;
-      overflow: auto;
+      display: block;
+      height: 100%;
+      min-height: 0;
+      max-height: 100%;
+      overflow-x: hidden;
+      overflow-y: scroll;
+      overscroll-behavior: contain;
+      padding: 10px;
+      background: #f8fafc;
+      scrollbar-gutter: stable;
+    }
+
+    .stock-list::-webkit-scrollbar {
+      width: 10px;
+    }
+
+    .stock-list::-webkit-scrollbar-thumb {
+      border: 2px solid #f8fafc;
+      border-radius: 999px;
+      background: #cbd5e1;
+    }
+
+    .stock-list::-webkit-scrollbar-track {
+      background: #f8fafc;
+    }
+
+    .stock-group-section {
+      display: block;
+      margin-bottom: 10px;
+      overflow: hidden;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #fff;
+    }
+
+    .stock-group-section:last-child {
+      border-bottom: 1px solid var(--line);
+      margin-bottom: 0;
+    }
+
+    .stock-group-head {
+      position: sticky;
+      top: 0;
+      z-index: 2;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      min-height: 34px;
+      padding: 7px 14px;
+      border-bottom: 1px solid var(--grid);
+      background: #f8fafc;
+      color: var(--amber);
+      font-size: 12px;
+      font-weight: 800;
+    }
+
+    .stock-group-head.empty {
+      color: var(--muted);
+    }
+
+    .stock-group-count {
+      color: var(--muted);
+      font-weight: 700;
+    }
+
+    .stock-group-items {
+      display: block;
+      overflow: visible;
     }
 
     .stock-item {
@@ -291,6 +363,38 @@
     .stock-date {
       color: var(--muted);
       font-size: 12px;
+    }
+
+    .stock-return {
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 800;
+    }
+
+    .stock-return.up {
+      color: var(--red);
+    }
+
+    .stock-return.down {
+      color: var(--teal);
+    }
+
+    .stock-return.flat {
+      color: var(--axis);
+    }
+
+    .stock-group {
+      overflow: hidden;
+      color: var(--axis);
+      font-size: 12px;
+      font-weight: 700;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .stock-group.empty {
+      color: var(--muted);
+      font-weight: 600;
     }
 
     .stock-badge {
@@ -645,6 +749,90 @@
       font-size: 14px;
     }
 
+    .modal-backdrop {
+      position: fixed;
+      inset: 0;
+      z-index: 50;
+      display: grid;
+      place-items: center;
+      padding: 18px;
+      background: rgba(15, 23, 42, 0.38);
+    }
+
+    .modal-backdrop[hidden] {
+      display: none;
+    }
+
+    .modal {
+      width: min(430px, 100%);
+      overflow: hidden;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #fff;
+      box-shadow: 0 24px 64px rgba(15, 23, 42, 0.22);
+    }
+
+    .modal-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      padding: 14px 16px;
+      border-bottom: 1px solid var(--line);
+    }
+
+    .modal-head h3 {
+      margin: 0;
+      color: var(--axis);
+      font-size: 17px;
+      line-height: 1.25;
+    }
+
+    .modal-close {
+      width: 32px;
+      height: 32px;
+      border-radius: 8px;
+      background: #f8fafc;
+      color: var(--axis);
+      font-size: 22px;
+      line-height: 1;
+    }
+
+    .modal-close:hover {
+      background: #eef2f7;
+    }
+
+    .modal-body {
+      display: grid;
+      gap: 14px;
+      padding: 16px;
+    }
+
+    .modal-stock {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex-wrap: wrap;
+      color: var(--axis);
+      font-weight: 800;
+    }
+
+    .modal-field {
+      display: grid;
+      gap: 6px;
+    }
+
+    .modal-field input {
+      width: 100%;
+    }
+
+    .modal-actions {
+      display: flex;
+      justify-content: flex-end;
+      gap: 8px;
+      padding: 0 16px 16px;
+    }
+
     @media (max-width: 900px) {
       .topbar,
       .content-head {
@@ -659,6 +847,20 @@
 
       .layout {
         grid-template-columns: 1fr;
+      }
+
+      .sidebar {
+        position: static;
+        display: block;
+        height: auto;
+        min-height: 0;
+        max-height: none;
+      }
+
+      .stock-list {
+        height: auto;
+        max-height: 520px;
+        overflow-y: auto;
       }
 
       input {
@@ -778,6 +980,29 @@
 
   <div class="tooltip" id="tooltip"></div>
 
+  <div id="stockEditModal" class="modal-backdrop" hidden>
+    <form id="stockEditForm" class="modal">
+      <div class="modal-head">
+        <h3>编辑个股信息</h3>
+        <button id="stockEditClose" class="modal-close" type="button" aria-label="关闭">×</button>
+      </div>
+      <div class="modal-body">
+        <div class="modal-stock">
+          <span id="stockEditName">-</span>
+          <span id="stockEditCode" class="pill">-</span>
+        </div>
+        <label class="modal-field" for="stockGroupInput">
+          个股分组
+          <input id="stockGroupInput" name="group" maxlength="32" placeholder="例如：光通信 / 观察 / 核心">
+        </label>
+      </div>
+      <div class="modal-actions">
+        <button id="stockEditCancel" class="btn secondary" type="button">取消</button>
+        <button id="stockEditSave" class="btn" type="submit">保存</button>
+      </div>
+    </form>
+  </div>
+
   <script>
     const state = {
       stocks: [],
@@ -788,7 +1013,8 @@
       busy: false,
       selectedCandidate: null,
       searchTimer: null,
-      klineSelection: []
+      klineSelection: [],
+      editingStockCode: null
     };
 
     const stockList = document.getElementById("stockList");
@@ -811,6 +1037,14 @@
     const klineRange = document.getElementById("klineRange");
     const statusNode = document.getElementById("status");
     const tooltip = document.getElementById("tooltip");
+    const stockEditModal = document.getElementById("stockEditModal");
+    const stockEditForm = document.getElementById("stockEditForm");
+    const stockEditName = document.getElementById("stockEditName");
+    const stockEditCode = document.getElementById("stockEditCode");
+    const stockGroupInput = document.getElementById("stockGroupInput");
+    const stockEditClose = document.getElementById("stockEditClose");
+    const stockEditCancel = document.getElementById("stockEditCancel");
+    const stockEditSave = document.getElementById("stockEditSave");
     let klineSelectionLayer = null;
 
     function setStatus(text, isError = false) {
@@ -823,6 +1057,7 @@
       refreshBtn.disabled = isBusy;
       deleteBtn.disabled = isBusy;
       addForm.querySelector("button").disabled = isBusy;
+      stockEditSave.disabled = isBusy;
     }
 
     async function api(path, options = {}) {
@@ -844,6 +1079,20 @@
 
     function formatPct(value) {
       return `${Number(value).toFixed(2)}%`;
+    }
+
+    function formatSignedPct(value) {
+      const number = Number(value);
+      if (!Number.isFinite(number)) return "-";
+      return `${number >= 0 ? "+" : ""}${number.toFixed(2)}%`;
+    }
+
+    function stockReturnClass(value) {
+      const number = Number(value);
+      if (!Number.isFinite(number)) return "";
+      if (number > 0) return " up";
+      if (number < 0) return " down";
+      return " flat";
     }
 
     function formatPrice(value) {
@@ -896,11 +1145,59 @@
       stockCount.textContent = String(state.stocks.length);
       stockList.innerHTML = "";
 
-      for (const stock of state.stocks) {
+      const groups = groupStocks(state.stocks);
+      for (const group of groups) {
+        const section = document.createElement("section");
+        section.className = "stock-group-section";
+        section.innerHTML = `
+          <div class="stock-group-head${group.name === "未分组" ? " empty" : ""}">
+            <span>${escapeHtml(group.name)}</span>
+            <span class="stock-group-count">${group.items.length}</span>
+          </div>
+        `;
+        const items = document.createElement("div");
+        items.className = "stock-group-items";
+
+        for (const stock of group.items) {
+          items.appendChild(createStockListItem(stock));
+        }
+
+        section.appendChild(items);
+        stockList.appendChild(section);
+      }
+    }
+
+    function groupStocks(stocks) {
+      const groups = new Map();
+      for (const stock of stocks) {
+        const name = String(stock.group || "").trim() || "未分组";
+        if (!groups.has(name)) {
+          groups.set(name, []);
+        }
+        groups.get(name).push(stock);
+      }
+
+      return [...groups.entries()]
+        .sort(([left], [right]) => {
+          if (left === "未分组" && right !== "未分组") return 1;
+          if (right === "未分组" && left !== "未分组") return -1;
+          return left.localeCompare(right, "zh-Hans-CN");
+        })
+        .map(([name, items]) => ({ name, items }));
+    }
+
+    function createStockListItem(stock) {
         const button = document.createElement("button");
+        const lastReturnText = formatSignedPct(stock.last_return_pct);
+        const lastReturnClass = stockReturnClass(stock.last_return_pct);
         button.type = "button";
         button.className = `stock-item${stock.code === state.selectedCode ? " active" : ""}`;
+        button.title = "双击编辑个股信息";
         button.addEventListener("click", () => selectStock(stock.code));
+        button.addEventListener("dblclick", event => {
+          event.preventDefault();
+          openStockEdit(stock);
+        });
         button.innerHTML = `
           <div class="stock-line">
             <span class="stock-name">${escapeHtml(stockLabel(stock))}</span>
@@ -908,10 +1205,55 @@
           </div>
           <div class="stock-line">
             <span class="stock-code">${stock.code}</span>
-            <span class="stock-date">${stock.end_trade_date || "-"}</span>
+            <span class="stock-date">${stock.end_trade_date || stock.last_return_date || "-"}</span>
+          </div>
+          <div class="stock-line">
+            <span class="stock-return${lastReturnClass}">日涨跌：${lastReturnText}</span>
           </div>
         `;
-        stockList.appendChild(button);
+        return button;
+    }
+
+    function openStockEdit(stock) {
+      const target = stock || state.stocks.find(item => item.code === state.selectedCode);
+      if (!target) return;
+
+      state.editingStockCode = target.code;
+      stockEditName.textContent = stockLabel(target);
+      stockEditCode.textContent = target.code;
+      stockGroupInput.value = target.group || "";
+      stockEditModal.hidden = false;
+      stockGroupInput.focus();
+      stockGroupInput.select();
+    }
+
+    function closeStockEdit() {
+      stockEditModal.hidden = true;
+      state.editingStockCode = null;
+      stockEditForm.reset();
+    }
+
+    async function saveStockEdit() {
+      const code = state.editingStockCode;
+      if (!code) return;
+
+      try {
+        setBusy(true);
+        setStatus("正在保存个股信息...");
+        const result = await api(`/api/stocks/${code}`, {
+          method: "PATCH",
+          body: JSON.stringify({
+            group: stockGroupInput.value.trim()
+          })
+        });
+        state.stocks = result.stocks || state.stocks;
+        closeStockEdit();
+        await loadStocks(code);
+        setStatus("个股信息已保存");
+      } catch (error) {
+        setStatus(error.message, true);
+      } finally {
+        setBusy(false);
       }
     }
 
@@ -988,6 +1330,7 @@
 
       const meta = stock.meta || {};
       const parts = [];
+      parts.push(`<span class="pill">分组 ${escapeHtml(stock.group || "未分组")}</span>`);
       if (stock.last_updated) parts.push(`<span class="pill">本地更新 ${escapeHtml(stock.last_updated)}</span>`);
       if (meta.end_trade_date) parts.push(`<span class="pill">终点 ${escapeHtml(meta.end_trade_date)}</span>`);
       const endClose = meta.end_close ?? meta.end_close_qfq;
@@ -1722,12 +2065,6 @@
       return (Number(end.close) / Number(start.baseClose) - 1) * 100;
     }
 
-    function formatSignedPct(value) {
-      const number = Number(value);
-      if (!Number.isFinite(number)) return "-";
-      return `${number >= 0 ? "+" : ""}${number.toFixed(2)}%`;
-    }
-
     function recentKline(kline, months) {
       const valid = kline.filter(item => item.date && Number.isFinite(Number(item.close)));
       if (!valid.length) return [];
@@ -1861,6 +2198,26 @@
     document.addEventListener("click", event => {
       if (!addForm.contains(event.target)) {
         hideCandidates();
+      }
+    });
+
+    stockEditForm.addEventListener("submit", event => {
+      event.preventDefault();
+      saveStockEdit();
+    });
+
+    stockEditClose.addEventListener("click", closeStockEdit);
+    stockEditCancel.addEventListener("click", closeStockEdit);
+
+    stockEditModal.addEventListener("click", event => {
+      if (event.target === stockEditModal) {
+        closeStockEdit();
+      }
+    });
+
+    document.addEventListener("keydown", event => {
+      if (event.key === "Escape" && !stockEditModal.hidden) {
+        closeStockEdit();
       }
     });
 
