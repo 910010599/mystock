@@ -291,6 +291,7 @@ def frame_to_kline(frame: pd.DataFrame) -> list[dict]:
     kline = []
     for trade_dt, item in prices.iterrows():
         volume_value = item.get("volume", item.get("vol", 0))
+        amount_value = item.get("amount", 0)
         kline.append(
             {
                 "date": trade_dt.date().isoformat(),
@@ -299,6 +300,7 @@ def frame_to_kline(frame: pd.DataFrame) -> list[dict]:
                 "low": round(float(item["low"]), 4),
                 "close": round(float(item["close"]), 4),
                 "volume": round(float(volume_value or 0), 4),
+                "amount": round(float(amount_value or 0), 4),
             }
         )
     return kline

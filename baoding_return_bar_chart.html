@@ -434,15 +434,44 @@
       font-weight: 800;
     }
 
+    .kline-controls {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      flex-wrap: wrap;
+      justify-content: flex-end;
+    }
+
+    .kline-controls label {
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 800;
+    }
+
+    .kline-controls select {
+      height: 30px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #fff;
+      color: var(--axis);
+      padding: 0 8px;
+      outline: none;
+    }
+
+    .kline-controls select:focus {
+      border-color: var(--teal);
+      box-shadow: 0 0 0 3px rgba(15, 118, 110, 0.14);
+    }
+
     .kline-wrap {
       position: relative;
       overflow-x: auto;
       padding: 10px 18px 18px;
     }
 
-    #klineChart {
+    .kline-wrap svg {
       min-width: 900px;
-      height: 430px;
+      height: 520px;
     }
 
     .candle {
@@ -457,6 +486,11 @@
     }
 
     .wick {
+      pointer-events: none;
+    }
+
+    .volume-bar {
+      opacity: 0.42;
       pointer-events: none;
     }
 
@@ -629,31 +663,42 @@
 
         <div class="kline-panel" id="stockKlinePanel">
           <div class="kline-head">
-            <span>最近 2 个月 K 线</span>
-            <span id="klineRange" class="pill">-</span>
+            <span>个股 K 线</span>
+            <div class="kline-controls">
+              <label for="klineMonths">显示范围</label>
+              <select id="klineMonths">
+                <option value="1">1个月</option>
+                <option value="2" selected>2个月</option>
+                <option value="3">3个月</option>
+                <option value="4">4个月</option>
+                <option value="5">5个月</option>
+                <option value="6">6个月</option>
+              </select>
+              <span id="klineRange" class="pill">-</span>
+            </div>
           </div>
           <div class="kline-wrap" id="klineWrap">
-            <svg id="klineChart" viewBox="0 0 1080 430" role="img" aria-label="最近2个月K线图"></svg>
+            <svg id="klineChart" viewBox="0 0 1080 520" role="img" aria-label="最近2个月K线图"></svg>
           </div>
         </div>
 
         <div class="kline-panel" id="shIndexPanel">
           <div class="kline-head">
-            <span>上证指数 最近 2 个月 K 线</span>
+            <span>上证指数 K 线</span>
             <span id="shIndexRange" class="pill">-</span>
           </div>
           <div class="kline-wrap" id="shIndexWrap">
-            <svg id="shIndexChart" viewBox="0 0 1080 430" role="img" aria-label="上证指数最近2个月K线图"></svg>
+            <svg id="shIndexChart" viewBox="0 0 1080 520" role="img" aria-label="上证指数最近2个月K线图"></svg>
           </div>
         </div>
 
         <div class="kline-panel" id="szIndexPanel">
           <div class="kline-head">
-            <span>深证成指 最近 2 个月 K 线</span>
+            <span>深证成指 K 线</span>
             <span id="szIndexRange" class="pill">-</span>
           </div>
           <div class="kline-wrap" id="szIndexWrap">
-            <svg id="szIndexChart" viewBox="0 0 1080 430" role="img" aria-label="深证成指最近2个月K线图"></svg>
+            <svg id="szIndexChart" viewBox="0 0 1080 520" role="img" aria-label="深证成指最近2个月K线图"></svg>
           </div>
         </div>
       </section>
@@ -669,6 +714,7 @@
       stocks: [],
       selectedCode: null,
       selectedStock: null,
+      klineMonths: 2,
       busy: false,
       selectedCandidate: null,
       searchTimer: null
@@ -687,6 +733,7 @@
     const chartWrap = document.getElementById("chartWrap");
     const svg = document.getElementById("barChart");
     const stockKlinePanel = document.getElementById("stockKlinePanel");
+    const klineMonths = document.getElementById("klineMonths");
     const klineWrap = document.getElementById("klineWrap");
     const klineSvg = document.getElementById("klineChart");
     const klineRange = document.getElementById("klineRange");
@@ -736,6 +783,21 @@
 
     function formatPrice(value) {
       return Number(value).toFixed(4);
+    }
+
+    function formatVolume(value) {
+      const number = Number(value || 0);
+      if (Math.abs(number) >= 100000000) return `${(number / 100000000).toFixed(2)}亿`;
+      if (Math.abs(number) >= 10000) return `${(number / 10000).toFixed(2)}万`;
+      return number.toFixed(0);
+    }
+
+    function formatAmount(value) {
+      const number = Number(value || 0);
+      if (!number) return "-";
+      if (Math.abs(number) >= 100000000) return `${(number / 100000000).toFixed(2)}亿`;
+      if (Math.abs(number) >= 10000) return `${(number / 10000).toFixed(2)}万`;
+      return number.toFixed(2);
     }
 
     function colorFor(value) {
@@ -1070,7 +1132,7 @@
       targetSvg.innerHTML = "";
       targetWrap.querySelector(".kline-empty")?.remove();
 
-      const candles = recentKline(kline || []);
+      const candles = recentKline(kline || [], state.klineMonths);
       if (!candles.length) {
         targetSvg.style.display = "none";
         targetRange.textContent = "-";
@@ -1085,14 +1147,21 @@
       targetRange.textContent = `${candles[0].date} 至 ${candles[candles.length - 1].date}`;
 
       const width = 1080;
-      const height = 430;
+      const height = 520;
       const margin = { top: 26, right: 58, bottom: 46, left: 64 };
       const chartWidth = width - margin.left - margin.right;
-      const chartHeight = height - margin.top - margin.bottom;
+      const volumeHeight = 82;
+      const volumeGap = 22;
+      const chartHeight = height - margin.top - margin.bottom - volumeHeight - volumeGap;
+      const priceBottom = margin.top + chartHeight;
+      const volumeTop = priceBottom + volumeGap;
+      const volumeBottom = volumeTop + volumeHeight;
       const highs = candles.map(item => Number(item.high));
       const lows = candles.map(item => Number(item.low));
+      const volumes = candles.map(item => Number(item.volume || 0));
       const maxPrice = Math.max(...highs);
       const minPrice = Math.min(...lows);
+      const maxVolume = Math.max(...volumes, 1);
       const priceRange = Math.max(maxPrice - minPrice, maxPrice * 0.02, 1);
       const paddedMax = maxPrice + priceRange * 0.06;
       const paddedMin = Math.max(0, minPrice - priceRange * 0.06);
@@ -1101,6 +1170,10 @@
 
       function yPrice(value) {
         return margin.top + ((paddedMax - value) / (paddedMax - paddedMin)) * chartHeight;
+      }
+
+      function yVolume(value) {
+        return volumeBottom - (value / maxVolume) * volumeHeight;
       }
 
       const grid = createSvg("g", { class: "grid" });
@@ -1129,21 +1202,38 @@
       const axis = createSvg("g", { class: "axis" });
       axis.appendChild(createSvg("line", {
         x1: margin.left,
-        y1: margin.top + chartHeight,
+        y1: priceBottom,
         x2: width - margin.right,
-        y2: margin.top + chartHeight,
+        y2: priceBottom,
         class: "axis-line"
       }));
       axis.appendChild(createSvg("line", {
         x1: margin.left,
         y1: margin.top,
         x2: margin.left,
-        y2: margin.top + chartHeight,
+        y2: volumeBottom,
         class: "axis-line"
       }));
+      axis.appendChild(createSvg("line", {
+        x1: margin.left,
+        y1: volumeBottom,
+        x2: width - margin.right,
+        y2: volumeBottom,
+        class: "axis-line"
+      }));
+      const volumeTitle = createSvg("text", {
+        x: margin.left,
+        y: volumeTop - 7,
+        fill: "#64748b",
+        "font-size": 12,
+        "font-weight": 800
+      });
+      volumeTitle.textContent = "成交量";
+      axis.appendChild(volumeTitle);
       targetSvg.appendChild(axis);
 
       const group = createSvg("g", { class: "candles" });
+      const volumeGroup = createSvg("g", { class: "volumes" });
       const labelStep = Math.max(1, Math.ceil(candles.length / 7));
 
       candles.forEach((item, index) => {
@@ -1154,6 +1244,7 @@
         const high = Number(item.high);
         const low = Number(item.low);
         const close = Number(item.close);
+        const volume = Number(item.volume || 0);
         const changePct = previous ? ((close / Number(previous.close) - 1) * 100) : null;
         const isUp = close >= open;
         const color = isUp ? "#dc2626" : "#0f766e";
@@ -1191,11 +1282,21 @@
         body.addEventListener("blur", hideTooltip);
         group.appendChild(body);
 
+        const volumeY = yVolume(volume);
+        volumeGroup.appendChild(createSvg("rect", {
+          class: "volume-bar",
+          x: xCenter - candleWidth / 2,
+          y: volumeY,
+          width: candleWidth,
+          height: Math.max(1, volumeBottom - volumeY),
+          fill: color
+        }));
+
         if (index === 0 || index === candles.length - 1 || index % labelStep === 0) {
           const label = createSvg("text", {
             class: "x-label",
             x: xCenter,
-            y: height - 18,
+            y: volumeBottom + 24,
             "text-anchor": "middle"
           });
           label.textContent = item.date.slice(5);
@@ -1203,6 +1304,7 @@
         }
       });
 
+      targetSvg.appendChild(volumeGroup);
       targetSvg.appendChild(group);
 
       const crosshair = createSvg("g", {
@@ -1212,7 +1314,7 @@
       const verticalLine = createSvg("line", {
         class: "crosshair-line",
         y1: margin.top,
-        y2: margin.top + chartHeight
+        y2: volumeBottom
       });
       const horizontalLine = createSvg("line", {
         class: "crosshair-line",
@@ -1240,7 +1342,7 @@
         x: margin.left,
         y: margin.top,
         width: chartWidth,
-        height: chartHeight,
+        height: volumeBottom - margin.top,
         fill: "transparent",
         "pointer-events": "all"
       });
@@ -1250,7 +1352,7 @@
         if (!cursor) return;
 
         const cursorX = Math.max(margin.left, Math.min(width - margin.right, cursor.x));
-        const cursorY = Math.max(margin.top, Math.min(margin.top + chartHeight, cursor.y));
+        const cursorY = Math.max(margin.top, Math.min(priceBottom, cursor.y));
         const nearestIndex = Math.max(
           0,
           Math.min(candles.length - 1, Math.round((cursorX - margin.left - slot / 2) / slot))
@@ -1286,14 +1388,14 @@
       targetSvg.appendChild(hitArea);
     }
 
-    function recentKline(kline) {
+    function recentKline(kline, months) {
       const valid = kline.filter(item => item.date && Number.isFinite(Number(item.close)));
       if (!valid.length) return [];
 
       const last = valid[valid.length - 1];
       const end = new Date(`${last.date}T00:00:00`);
       const start = new Date(end);
-      start.setMonth(start.getMonth() - 2);
+      start.setMonth(start.getMonth() - Number(months || 2));
 
       return valid.filter(item => {
         const date = new Date(`${item.date}T00:00:00`);
@@ -1349,7 +1451,9 @@
         最高：${formatPrice(item.high)}<br>
         最低：${formatPrice(item.low)}<br>
         收盘：${formatPrice(item.close)}<br>
-        涨跌幅：${changePct ? `${changePct}%` : "-"}
+        涨跌幅：${changePct ? `${changePct}%` : "-"}<br>
+        成交量：${formatVolume(item.volume)}<br>
+        成交额：${formatAmount(item.amount)}
       `;
       tooltip.style.display = "block";
       const x = event.clientX || event.target.getBoundingClientRect().left;
@@ -1450,6 +1554,13 @@
       } finally {
         setBusy(false);
       }
+    });
+
+    klineMonths.addEventListener("change", () => {
+      state.klineMonths = Number(klineMonths.value || 2);
+      if (!state.selectedStock) return;
+
+      renderAllKlines(state.selectedStock.kline || [], state.selectedStock.indices || {});
     });
 
     loadStocks().catch(error => setStatus(error.message, true));
