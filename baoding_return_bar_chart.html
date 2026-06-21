@@ -463,6 +463,19 @@
       box-shadow: 0 0 0 3px rgba(15, 118, 110, 0.14);
     }
 
+    .kline-controls input[type="range"] {
+      width: 118px;
+      accent-color: var(--teal);
+    }
+
+    .range-value {
+      min-width: 34px;
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 800;
+      text-align: right;
+    }
+
     .kline-wrap {
       position: relative;
       overflow-x: auto;
@@ -668,12 +681,16 @@
               <label for="klineMonths">显示范围</label>
               <select id="klineMonths">
                 <option value="1">1个月</option>
-                <option value="2" selected>2个月</option>
+                <option value="2">2个月</option>
                 <option value="3">3个月</option>
                 <option value="4">4个月</option>
                 <option value="5">5个月</option>
-                <option value="6">6个月</option>
+                <option value="6" selected>6个月</option>
+                <option value="8">8个月</option>
               </select>
+              <label for="klineSpacing">间距</label>
+              <input id="klineSpacing" type="range" min="0" max="24" step="0.5" value="2">
+              <span id="klineSpacingValue" class="range-value">2px</span>
               <span id="klineRange" class="pill">-</span>
             </div>
           </div>
@@ -714,7 +731,8 @@
       stocks: [],
       selectedCode: null,
       selectedStock: null,
-      klineMonths: 2,
+      klineMonths: 6,
+      klineGap: 2,
       busy: false,
       selectedCandidate: null,
       searchTimer: null
@@ -734,6 +752,8 @@
     const svg = document.getElementById("barChart");
     const stockKlinePanel = document.getElementById("stockKlinePanel");
     const klineMonths = document.getElementById("klineMonths");
+    const klineSpacing = document.getElementById("klineSpacing");
+    const klineSpacingValue = document.getElementById("klineSpacingValue");
     const klineWrap = document.getElementById("klineWrap");
     const klineSvg = document.getElementById("klineChart");
     const klineRange = document.getElementById("klineRange");
@@ -1146,9 +1166,17 @@
       targetSvg.style.display = "block";
       targetRange.textContent = `${candles[0].date} 至 ${candles[candles.length - 1].date}`;
 
-      const width = 1080;
+      const wrapStyle = getComputedStyle(targetWrap);
+      const wrapPaddingX = (Number.parseFloat(wrapStyle.paddingLeft) || 0) + (Number.parseFloat(wrapStyle.paddingRight) || 0);
+      const baseWidth = Math.max(720, targetWrap.clientWidth - wrapPaddingX);
       const height = 520;
       const margin = { top: 26, right: 58, bottom: 46, left: 64 };
+      const baseChartWidth = baseWidth - margin.left - margin.right;
+      const baseSlot = baseChartWidth / candles.length;
+      const candleWidth = Math.max(4, Math.min(16, baseSlot * 0.58));
+      const slot = candleWidth + state.klineGap;
+      const dataWidth = Math.max(candleWidth * candles.length + state.klineGap * Math.max(0, candles.length - 1), 1);
+      const width = Math.max(baseWidth, margin.left + margin.right + dataWidth);
       const chartWidth = width - margin.left - margin.right;
       const volumeHeight = 82;
       const volumeGap = 22;
@@ -1165,8 +1193,8 @@
       const priceRange = Math.max(maxPrice - minPrice, maxPrice * 0.02, 1);
       const paddedMax = maxPrice + priceRange * 0.06;
       const paddedMin = Math.max(0, minPrice - priceRange * 0.06);
-      const slot = chartWidth / candles.length;
-      const candleWidth = Math.max(4, Math.min(16, slot * 0.58));
+      targetSvg.setAttribute("viewBox", `0 0 ${width} ${height}`);
+      targetSvg.style.minWidth = `${width}px`;
 
       function yPrice(value) {
         return margin.top + ((paddedMax - value) / (paddedMax - paddedMin)) * chartHeight;
@@ -1557,7 +1585,16 @@
     });
 
     klineMonths.addEventListener("change", () => {
-      state.klineMonths = Number(klineMonths.value || 2);
+      state.klineMonths = Number(klineMonths.value || 6);
+      if (!state.selectedStock) return;
+
+      renderAllKlines(state.selectedStock.kline || [], state.selectedStock.indices || {});
+    });
+
+    klineSpacing.addEventListener("input", () => {
+      const value = Number(klineSpacing.value || 2);
+      state.klineGap = value;
+      klineSpacingValue.textContent = `${value}px`;
       if (!state.selectedStock) return;
 
       renderAllKlines(state.selectedStock.kline || [], state.selectedStock.indices || {});
