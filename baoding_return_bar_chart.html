@@ -1,0 +1,1458 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>自选股涨幅看板</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --bg: #f5f7fa;
+      --panel: #ffffff;
+      --text: #152033;
+      --muted: #64748b;
+      --line: #dbe3ed;
+      --grid: #edf2f7;
+      --axis: #334155;
+      --teal: #0f766e;
+      --teal-dark: #0b5f59;
+      --blue: #2563eb;
+      --amber: #d97706;
+      --red: #dc2626;
+      --shadow: 0 18px 48px rgba(15, 23, 42, 0.08);
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      min-height: 100vh;
+      background: var(--bg);
+      color: var(--text);
+      font-family: "Microsoft YaHei", "PingFang SC", "Segoe UI", Arial, sans-serif;
+      font-size: 15px;
+      line-height: 1.5;
+    }
+
+    button,
+    input,
+    select {
+      font: inherit;
+    }
+
+    button {
+      border: 0;
+      cursor: pointer;
+    }
+
+    button:disabled {
+      cursor: wait;
+      opacity: 0.65;
+    }
+
+    .app {
+      width: min(1320px, calc(100% - 28px));
+      margin: 0 auto;
+      padding: 22px 0 34px;
+    }
+
+    .topbar {
+      display: flex;
+      align-items: flex-end;
+      justify-content: space-between;
+      gap: 18px;
+      margin-bottom: 16px;
+    }
+
+    h1 {
+      margin: 0 0 4px;
+      font-size: 26px;
+      line-height: 1.2;
+      letter-spacing: 0;
+    }
+
+    .meta {
+      margin: 0;
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    .actions {
+      display: flex;
+      align-items: end;
+      justify-content: flex-end;
+      gap: 10px;
+      flex-wrap: wrap;
+    }
+
+    .field {
+      display: grid;
+      gap: 5px;
+    }
+
+    .search-field {
+      position: relative;
+      width: 280px;
+    }
+
+    label {
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 700;
+    }
+
+    input {
+      width: 150px;
+      height: 38px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #fff;
+      color: var(--text);
+      padding: 0 11px;
+      outline: none;
+    }
+
+    input:focus {
+      border-color: var(--teal);
+      box-shadow: 0 0 0 3px rgba(15, 118, 110, 0.14);
+    }
+
+    .search-field input {
+      width: 100%;
+    }
+
+    .suggestions {
+      position: absolute;
+      z-index: 30;
+      top: calc(100% + 6px);
+      left: 0;
+      right: 0;
+      overflow: hidden;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #fff;
+      box-shadow: 0 14px 36px rgba(15, 23, 42, 0.16);
+    }
+
+    .suggestions[hidden] {
+      display: none;
+    }
+
+    .candidate-item {
+      display: grid;
+      grid-template-columns: 1fr auto;
+      gap: 8px;
+      width: 100%;
+      padding: 10px 12px;
+      border-bottom: 1px solid var(--grid);
+      background: #fff;
+      color: var(--text);
+      text-align: left;
+    }
+
+    .candidate-item:last-child {
+      border-bottom: 0;
+    }
+
+    .candidate-item:hover,
+    .candidate-item.active {
+      background: #eef7f6;
+    }
+
+    .candidate-name {
+      overflow: hidden;
+      font-weight: 800;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .candidate-code {
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 700;
+    }
+
+    .candidate-empty {
+      padding: 10px 12px;
+      color: var(--muted);
+      font-weight: 700;
+    }
+
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 7px;
+      min-height: 38px;
+      padding: 0 13px;
+      border-radius: 8px;
+      background: var(--teal);
+      color: #fff;
+      font-weight: 700;
+      white-space: nowrap;
+    }
+
+    .btn:hover {
+      background: var(--teal-dark);
+    }
+
+    .btn.secondary {
+      border: 1px solid var(--line);
+      background: #fff;
+      color: var(--axis);
+    }
+
+    .btn.secondary:hover {
+      background: #f8fafc;
+    }
+
+    .btn.danger {
+      border: 1px solid #fecaca;
+      background: #fff;
+      color: var(--red);
+    }
+
+    .btn.danger:hover {
+      background: #fff7f7;
+    }
+
+    .layout {
+      display: grid;
+      grid-template-columns: 280px minmax(0, 1fr);
+      gap: 16px;
+      align-items: start;
+    }
+
+    .sidebar,
+    .content {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: var(--panel);
+      box-shadow: var(--shadow);
+    }
+
+    .sidebar {
+      overflow: hidden;
+    }
+
+    .section-title {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      min-height: 52px;
+      padding: 0 14px;
+      border-bottom: 1px solid var(--line);
+      color: var(--axis);
+      font-weight: 800;
+    }
+
+    .stock-list {
+      display: grid;
+      gap: 0;
+      max-height: 620px;
+      overflow: auto;
+    }
+
+    .stock-item {
+      display: grid;
+      gap: 3px;
+      width: 100%;
+      padding: 12px 14px;
+      border-bottom: 1px solid var(--grid);
+      background: #fff;
+      color: var(--text);
+      text-align: left;
+    }
+
+    .stock-item:hover,
+    .stock-item.active {
+      background: #eef7f6;
+    }
+
+    .stock-line {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      min-width: 0;
+    }
+
+    .stock-name {
+      overflow: hidden;
+      font-weight: 800;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .stock-code,
+    .stock-date {
+      color: var(--muted);
+      font-size: 12px;
+    }
+
+    .stock-badge {
+      flex: 0 0 auto;
+      border-radius: 999px;
+      background: #e0f2fe;
+      color: #0369a1;
+      padding: 2px 8px;
+      font-size: 12px;
+      font-weight: 700;
+    }
+
+    .stock-badge.empty {
+      background: #f1f5f9;
+      color: var(--muted);
+    }
+
+    .content {
+      min-width: 0;
+      overflow: hidden;
+    }
+
+    .content-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+      padding: 16px 18px;
+      border-bottom: 1px solid var(--line);
+    }
+
+    .title-row {
+      display: flex;
+      align-items: baseline;
+      gap: 10px;
+      flex-wrap: wrap;
+    }
+
+    h2 {
+      margin: 0;
+      font-size: 22px;
+      line-height: 1.2;
+      letter-spacing: 0;
+    }
+
+    .summary {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      color: var(--muted);
+      font-size: 13px;
+      flex-wrap: wrap;
+    }
+
+    .pill {
+      display: inline-flex;
+      align-items: center;
+      min-height: 28px;
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      background: #fff;
+      color: var(--axis);
+      padding: 3px 9px;
+      font-size: 12px;
+      font-weight: 700;
+    }
+
+    .chart-wrap {
+      position: relative;
+      overflow-x: auto;
+      padding: 20px 18px 14px;
+    }
+
+    svg {
+      display: block;
+      min-width: 900px;
+      width: 100%;
+      height: 530px;
+    }
+
+    .axis text,
+    .grid text {
+      fill: var(--muted);
+      font-size: 12px;
+    }
+
+    .axis-line {
+      stroke: var(--axis);
+      stroke-width: 1;
+    }
+
+    .grid-line {
+      stroke: var(--grid);
+      stroke-width: 1;
+    }
+
+    .bar {
+      cursor: pointer;
+      transition: opacity 120ms ease, filter 120ms ease;
+    }
+
+    .bar:hover,
+    .bar:focus {
+      opacity: 0.84;
+      filter: brightness(0.95);
+      outline: none;
+    }
+
+    .bar-label {
+      fill: var(--axis);
+      font-size: 11px;
+      font-weight: 800;
+      pointer-events: none;
+    }
+
+    .x-label {
+      fill: var(--muted);
+      font-size: 12px;
+    }
+
+    .empty-state {
+      display: grid;
+      place-items: center;
+      min-height: 300px;
+      color: var(--muted);
+      font-weight: 700;
+    }
+
+    .kline-panel {
+      overflow-x: auto;
+      border-top: 1px solid var(--line);
+    }
+
+    .kline-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      padding: 14px 18px 0;
+      color: var(--axis);
+      font-weight: 800;
+    }
+
+    .kline-wrap {
+      position: relative;
+      overflow-x: auto;
+      padding: 10px 18px 18px;
+    }
+
+    #klineChart {
+      min-width: 900px;
+      height: 430px;
+    }
+
+    .candle {
+      cursor: pointer;
+      transition: opacity 120ms ease;
+    }
+
+    .candle:hover,
+    .candle:focus {
+      opacity: 0.78;
+      outline: none;
+    }
+
+    .wick {
+      pointer-events: none;
+    }
+
+    .crosshair-line {
+      stroke: #475569;
+      stroke-width: 1;
+      stroke-dasharray: 4 4;
+      pointer-events: none;
+    }
+
+    .crosshair-label-bg {
+      fill: #334155;
+      rx: 4;
+      pointer-events: none;
+    }
+
+    .crosshair-label {
+      fill: #fff;
+      font-size: 12px;
+      font-weight: 800;
+      pointer-events: none;
+    }
+
+    .kline-hit-area {
+      cursor: crosshair;
+    }
+
+    .kline-empty {
+      display: grid;
+      place-items: center;
+      min-height: 220px;
+      color: var(--muted);
+      font-weight: 700;
+    }
+
+    .status {
+      min-height: 22px;
+      margin-top: 12px;
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    .status.error {
+      color: var(--red);
+      font-weight: 700;
+    }
+
+    .tooltip {
+      position: fixed;
+      z-index: 20;
+      display: none;
+      min-width: 196px;
+      padding: 10px 12px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #fff;
+      color: var(--text);
+      box-shadow: 0 12px 32px rgba(15, 23, 42, 0.14);
+      font-size: 13px;
+      pointer-events: none;
+    }
+
+    .tooltip strong {
+      display: block;
+      margin-bottom: 4px;
+      color: var(--axis);
+      font-size: 14px;
+    }
+
+    @media (max-width: 900px) {
+      .topbar,
+      .content-head {
+        align-items: flex-start;
+        flex-direction: column;
+      }
+
+      .actions {
+        justify-content: flex-start;
+        width: 100%;
+      }
+
+      .layout {
+        grid-template-columns: 1fr;
+      }
+
+      input {
+        width: min(46vw, 170px);
+      }
+    }
+
+    @media (max-width: 560px) {
+      .app {
+        width: min(100% - 18px, 1320px);
+        padding-top: 14px;
+      }
+
+      h1 {
+        font-size: 22px;
+      }
+
+      h2 {
+        font-size: 20px;
+      }
+
+      .content-head,
+      .chart-wrap {
+        padding-left: 12px;
+        padding-right: 12px;
+      }
+
+      input {
+        width: 100%;
+      }
+
+      .field {
+        width: 100%;
+      }
+
+      .btn {
+        width: 100%;
+      }
+    }
+  </style>
+</head>
+<body>
+  <main class="app">
+    <header class="topbar">
+      <div>
+        <h1>自选股涨幅看板</h1>
+        <p class="meta">本地保存自选股的 5/10/15 交易日和 1-24 个月未复权涨幅数据</p>
+      </div>
+
+      <form class="actions" id="addForm">
+        <div class="field search-field">
+          <label for="stockSearch">代码或名称</label>
+          <input id="stockSearch" name="query" maxlength="32" placeholder="宝鼎科技 / 002552" autocomplete="off">
+          <div id="searchResults" class="suggestions" hidden></div>
+        </div>
+        <button class="btn" type="submit">＋ 添加</button>
+      </form>
+    </header>
+
+    <div class="layout">
+      <aside class="sidebar">
+        <div class="section-title">
+          <span>自选股票</span>
+          <span id="stockCount" class="pill">0</span>
+        </div>
+        <div id="stockList" class="stock-list"></div>
+      </aside>
+
+      <section class="content">
+        <div class="content-head">
+          <div>
+            <div class="title-row">
+              <h2 id="selectedTitle">-</h2>
+              <span id="selectedCode" class="pill">-</span>
+            </div>
+            <div class="summary" id="selectedMeta"></div>
+          </div>
+          <div class="actions">
+            <button id="refreshBtn" class="btn" type="button">↻ 获取数据</button>
+            <button id="deleteBtn" class="btn danger" type="button">删除</button>
+          </div>
+        </div>
+
+        <div class="chart-wrap" id="chartWrap">
+          <svg id="barChart" viewBox="0 0 1080 530" role="img" aria-label="涨幅柱状图"></svg>
+        </div>
+
+        <div class="kline-panel" id="stockKlinePanel">
+          <div class="kline-head">
+            <span>最近 2 个月 K 线</span>
+            <span id="klineRange" class="pill">-</span>
+          </div>
+          <div class="kline-wrap" id="klineWrap">
+            <svg id="klineChart" viewBox="0 0 1080 430" role="img" aria-label="最近2个月K线图"></svg>
+          </div>
+        </div>
+
+        <div class="kline-panel" id="shIndexPanel">
+          <div class="kline-head">
+            <span>上证指数 最近 2 个月 K 线</span>
+            <span id="shIndexRange" class="pill">-</span>
+          </div>
+          <div class="kline-wrap" id="shIndexWrap">
+            <svg id="shIndexChart" viewBox="0 0 1080 430" role="img" aria-label="上证指数最近2个月K线图"></svg>
+          </div>
+        </div>
+
+        <div class="kline-panel" id="szIndexPanel">
+          <div class="kline-head">
+            <span>深证成指 最近 2 个月 K 线</span>
+            <span id="szIndexRange" class="pill">-</span>
+          </div>
+          <div class="kline-wrap" id="szIndexWrap">
+            <svg id="szIndexChart" viewBox="0 0 1080 430" role="img" aria-label="深证成指最近2个月K线图"></svg>
+          </div>
+        </div>
+      </section>
+    </div>
+
+    <div id="status" class="status"></div>
+  </main>
+
+  <div class="tooltip" id="tooltip"></div>
+
+  <script>
+    const state = {
+      stocks: [],
+      selectedCode: null,
+      selectedStock: null,
+      busy: false,
+      selectedCandidate: null,
+      searchTimer: null
+    };
+
+    const stockList = document.getElementById("stockList");
+    const stockCount = document.getElementById("stockCount");
+    const addForm = document.getElementById("addForm");
+    const stockSearch = document.getElementById("stockSearch");
+    const searchResults = document.getElementById("searchResults");
+    const refreshBtn = document.getElementById("refreshBtn");
+    const deleteBtn = document.getElementById("deleteBtn");
+    const selectedTitle = document.getElementById("selectedTitle");
+    const selectedCode = document.getElementById("selectedCode");
+    const selectedMeta = document.getElementById("selectedMeta");
+    const chartWrap = document.getElementById("chartWrap");
+    const svg = document.getElementById("barChart");
+    const stockKlinePanel = document.getElementById("stockKlinePanel");
+    const klineWrap = document.getElementById("klineWrap");
+    const klineSvg = document.getElementById("klineChart");
+    const klineRange = document.getElementById("klineRange");
+    const shIndexPanel = document.getElementById("shIndexPanel");
+    const shIndexWrap = document.getElementById("shIndexWrap");
+    const shIndexSvg = document.getElementById("shIndexChart");
+    const shIndexRange = document.getElementById("shIndexRange");
+    const szIndexPanel = document.getElementById("szIndexPanel");
+    const szIndexWrap = document.getElementById("szIndexWrap");
+    const szIndexSvg = document.getElementById("szIndexChart");
+    const szIndexRange = document.getElementById("szIndexRange");
+    const statusNode = document.getElementById("status");
+    const tooltip = document.getElementById("tooltip");
+
+    function setStatus(text, isError = false) {
+      statusNode.textContent = text || "";
+      statusNode.classList.toggle("error", Boolean(isError));
+    }
+
+    function setBusy(isBusy) {
+      state.busy = isBusy;
+      refreshBtn.disabled = isBusy;
+      deleteBtn.disabled = isBusy;
+      addForm.querySelector("button").disabled = isBusy;
+    }
+
+    async function api(path, options = {}) {
+      const response = await fetch(path, {
+        ...options,
+        headers: {
+          "Content-Type": "application/json",
+          ...(options.headers || {})
+        }
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        const error = new Error(payload.error || `请求失败：${response.status}`);
+        error.payload = payload;
+        throw error;
+      }
+      return payload;
+    }
+
+    function formatPct(value) {
+      return `${Number(value).toFixed(2)}%`;
+    }
+
+    function formatPrice(value) {
+      return Number(value).toFixed(4);
+    }
+
+    function colorFor(value) {
+      if (value >= 500) return "#d97706";
+      if (value >= 400) return "#2563eb";
+      return "#0f766e";
+    }
+
+    function stockLabel(stock) {
+      return stock.name && stock.name !== stock.code ? `${stock.name}` : stock.code;
+    }
+
+    async function loadStocks(preferredCode = null) {
+      const payload = await api("/api/stocks");
+      state.stocks = payload.stocks || [];
+      renderStockList();
+
+      const nextCode = preferredCode
+        || state.selectedCode
+        || state.stocks[0]?.code
+        || null;
+
+      if (nextCode) {
+        await selectStock(nextCode);
+      } else {
+        renderEmpty("暂无自选股票");
+      }
+    }
+
+    function renderStockList() {
+      stockCount.textContent = String(state.stocks.length);
+      stockList.innerHTML = "";
+
+      for (const stock of state.stocks) {
+        const button = document.createElement("button");
+        button.type = "button";
+        button.className = `stock-item${stock.code === state.selectedCode ? " active" : ""}`;
+        button.addEventListener("click", () => selectStock(stock.code));
+        button.innerHTML = `
+          <div class="stock-line">
+            <span class="stock-name">${escapeHtml(stockLabel(stock))}</span>
+            <span class="stock-badge${stock.has_data ? "" : " empty"}">${stock.has_data ? "已缓存" : "未获取"}</span>
+          </div>
+          <div class="stock-line">
+            <span class="stock-code">${stock.code}</span>
+            <span class="stock-date">${stock.end_trade_date || "-"}</span>
+          </div>
+        `;
+        stockList.appendChild(button);
+      }
+    }
+
+    function hideCandidates() {
+      searchResults.hidden = true;
+      searchResults.innerHTML = "";
+    }
+
+    function renderCandidates(candidates, emptyText = "未找到匹配股票") {
+      const items = candidates || [];
+      searchResults.hidden = false;
+
+      if (!items.length) {
+        searchResults.innerHTML = `<div class="candidate-empty">${escapeHtml(emptyText)}</div>`;
+        return;
+      }
+
+      searchResults.innerHTML = items.map(candidate => `
+        <button class="candidate-item" type="button" data-code="${escapeHtml(candidate.code)}" data-name="${escapeHtml(candidate.name)}">
+          <span>
+            <span class="candidate-name">${escapeHtml(candidate.name)}</span>
+            <span class="candidate-code">${escapeHtml(candidate.code)}</span>
+          </span>
+          <span class="candidate-code">${candidate.market === 1 ? "沪市" : "深市"}</span>
+        </button>
+      `).join("");
+
+      searchResults.querySelectorAll("button.candidate-item").forEach(button => {
+        button.addEventListener("mousedown", event => event.preventDefault());
+        button.addEventListener("click", () => {
+          const candidate = {
+            code: button.dataset.code,
+            name: button.dataset.name
+          };
+          state.selectedCandidate = candidate;
+          stockSearch.value = `${candidate.name} ${candidate.code}`;
+          hideCandidates();
+          setStatus(`已选择 ${candidate.name} ${candidate.code}`);
+        });
+      });
+    }
+
+    async function searchCandidates(query) {
+      const text = query.trim();
+      state.selectedCandidate = null;
+
+      if (!text) {
+        hideCandidates();
+        return;
+      }
+
+      try {
+        const payload = await api(`/api/search?q=${encodeURIComponent(text)}&limit=12`);
+        if (stockSearch.value.trim() !== text) return;
+        renderCandidates(payload.candidates || []);
+      } catch (error) {
+        renderCandidates([], error.message);
+      }
+    }
+
+    async function selectStock(code) {
+      state.selectedCode = code;
+      renderStockList();
+
+      const stock = await api(`/api/stocks/${code}`);
+      state.selectedStock = stock;
+      renderSelected(stock);
+    }
+
+    function renderSelected(stock) {
+      selectedTitle.textContent = stockLabel(stock);
+      selectedCode.textContent = stock.code;
+      orderIndexPanels(stock.code);
+      deleteBtn.style.display = stock.code === "002552" ? "none" : "inline-flex";
+
+      const meta = stock.meta || {};
+      const parts = [];
+      if (stock.last_updated) parts.push(`<span class="pill">本地更新 ${escapeHtml(stock.last_updated)}</span>`);
+      if (meta.end_trade_date) parts.push(`<span class="pill">终点 ${escapeHtml(meta.end_trade_date)}</span>`);
+      const endClose = meta.end_close ?? meta.end_close_qfq;
+      if (endClose) parts.push(`<span class="pill">收盘 ${Number(endClose).toFixed(2)}</span>`);
+      if (meta.adjust) parts.push(`<span class="pill">${meta.adjust === "none" ? "未复权" : escapeHtml(meta.adjust.toUpperCase())}</span>`);
+      selectedMeta.innerHTML = parts.join("");
+
+      const rows = stock.rows || [];
+      const kline = stock.kline || [];
+      const indices = stock.indices || {};
+      if (!rows.length) {
+        renderEmpty("暂无本地数据");
+        renderAllKlines(kline, indices);
+        return;
+      }
+
+      renderChart(rows);
+      renderAllKlines(kline, indices);
+    }
+
+    function orderIndexPanels(code) {
+      const parent = shIndexPanel.parentNode;
+      const isShanghai = String(code || "").startsWith("6");
+      const firstIndexPanel = isShanghai ? shIndexPanel : szIndexPanel;
+      const secondIndexPanel = isShanghai ? szIndexPanel : shIndexPanel;
+
+      if (stockKlinePanel.nextSibling !== firstIndexPanel) {
+        parent.insertBefore(firstIndexPanel, stockKlinePanel.nextSibling);
+      }
+
+      if (firstIndexPanel.nextSibling !== secondIndexPanel) {
+        parent.insertBefore(secondIndexPanel, firstIndexPanel.nextSibling);
+      }
+    }
+
+    function renderEmpty(text) {
+      svg.innerHTML = "";
+      chartWrap.querySelector(".empty-state")?.remove();
+      const empty = document.createElement("div");
+      empty.className = "empty-state";
+      empty.textContent = text;
+      chartWrap.appendChild(empty);
+    }
+
+    function clearEmpty() {
+      chartWrap.querySelector(".empty-state")?.remove();
+    }
+
+    function createSvg(tag, attrs = {}) {
+      const node = document.createElementNS("http://www.w3.org/2000/svg", tag);
+      Object.entries(attrs).forEach(([key, value]) => node.setAttribute(key, value));
+      return node;
+    }
+
+    function svgCursorPoint(svgNode, event) {
+      const matrix = svgNode.getScreenCTM();
+      if (!matrix) return null;
+
+      const point = svgNode.createSVGPoint();
+      point.x = event.clientX;
+      point.y = event.clientY;
+      return point.matrixTransform(matrix.inverse());
+    }
+
+    function renderChart(rows) {
+      clearEmpty();
+      svg.innerHTML = "";
+
+      const width = 1080;
+      const height = 530;
+      const margin = { top: 34, right: 34, bottom: 72, left: 74 };
+      const chartWidth = width - margin.left - margin.right;
+      const chartHeight = height - margin.top - margin.bottom;
+      const maxPct = Math.max(100, Math.ceil(Math.max(...rows.map(row => row.return_pct)) / 100) * 100);
+      const step = maxPct <= 300 ? 50 : 100;
+      const barGap = 10;
+      const barWidth = (chartWidth - barGap * (rows.length - 1)) / rows.length;
+      const baseline = margin.top + chartHeight;
+
+      function yScale(value) {
+        return baseline - (value / maxPct) * chartHeight;
+      }
+
+      const grid = createSvg("g", { class: "grid" });
+      for (let value = 0; value <= maxPct; value += step) {
+        const y = yScale(value);
+        grid.appendChild(createSvg("line", {
+          x1: margin.left,
+          y1: y,
+          x2: width - margin.right,
+          y2: y,
+          class: value === 0 ? "axis-line" : "grid-line"
+        }));
+
+        const label = createSvg("text", {
+          x: margin.left - 12,
+          y: y + 4,
+          "text-anchor": "end"
+        });
+        label.textContent = `${value}%`;
+        grid.appendChild(label);
+      }
+      svg.appendChild(grid);
+
+      const axis = createSvg("g", { class: "axis" });
+      axis.appendChild(createSvg("line", {
+        x1: margin.left,
+        y1: margin.top,
+        x2: margin.left,
+        y2: baseline,
+        class: "axis-line"
+      }));
+
+      const yTitle = createSvg("text", {
+        x: margin.left,
+        y: margin.top - 14,
+        fill: "#334155",
+        "font-size": 13,
+        "font-weight": 800
+      });
+      yTitle.textContent = "涨幅";
+      axis.appendChild(yTitle);
+
+      const xTitle = createSvg("text", {
+        x: width - margin.right,
+        y: baseline + 56,
+        fill: "#334155",
+        "font-size": 13,
+        "font-weight": 800,
+        "text-anchor": "end"
+      });
+      xTitle.textContent = "回看周期";
+      axis.appendChild(xTitle);
+      svg.appendChild(axis);
+
+      const bars = createSvg("g", { class: "bars" });
+      rows.forEach((row, index) => {
+        const x = margin.left + index * (barWidth + barGap);
+        const y = yScale(row.return_pct);
+        const h = baseline - y;
+
+        const bar = createSvg("rect", {
+          class: "bar",
+          x,
+          y,
+          width: barWidth,
+          height: h,
+          rx: 4,
+          fill: colorFor(row.return_pct),
+          tabindex: 0,
+          "aria-label": `${rowLabel(row)}涨幅${formatPct(row.return_pct)}`
+        });
+        bar.addEventListener("mousemove", event => showTooltip(event, row));
+        bar.addEventListener("mouseleave", hideTooltip);
+        bar.addEventListener("focus", event => showTooltip(event, row));
+        bar.addEventListener("blur", hideTooltip);
+        bars.appendChild(bar);
+
+        const valueLabel = createSvg("text", {
+          class: "bar-label",
+          x: x + barWidth / 2,
+          y: Math.max(y - 8, margin.top + 12),
+          "text-anchor": "middle"
+        });
+        valueLabel.textContent = Math.round(row.return_pct);
+        bars.appendChild(valueLabel);
+
+        const xLabel = createSvg("text", {
+          class: "x-label",
+          x: x + barWidth / 2,
+          y: baseline + 24,
+          "text-anchor": "middle"
+        });
+        xLabel.textContent = rowLabel(row);
+        bars.appendChild(xLabel);
+      });
+      svg.appendChild(bars);
+    }
+
+    function renderAllKlines(kline, indices) {
+      renderKline(kline, {
+        svg: klineSvg,
+        wrap: klineWrap,
+        range: klineRange,
+        emptyText: "暂无个股K线数据"
+      });
+      renderKline(indices?.sh?.kline || [], {
+        svg: shIndexSvg,
+        wrap: shIndexWrap,
+        range: shIndexRange,
+        emptyText: "暂无上证指数K线数据"
+      });
+      renderKline(indices?.sz?.kline || [], {
+        svg: szIndexSvg,
+        wrap: szIndexWrap,
+        range: szIndexRange,
+        emptyText: "暂无深证成指K线数据"
+      });
+    }
+
+    function renderKline(kline, target) {
+      const targetSvg = target.svg;
+      const targetWrap = target.wrap;
+      const targetRange = target.range;
+
+      targetSvg.innerHTML = "";
+      targetWrap.querySelector(".kline-empty")?.remove();
+
+      const candles = recentKline(kline || []);
+      if (!candles.length) {
+        targetSvg.style.display = "none";
+        targetRange.textContent = "-";
+        const empty = document.createElement("div");
+        empty.className = "kline-empty";
+        empty.textContent = target.emptyText || "暂无K线数据";
+        targetWrap.appendChild(empty);
+        return;
+      }
+
+      targetSvg.style.display = "block";
+      targetRange.textContent = `${candles[0].date} 至 ${candles[candles.length - 1].date}`;
+
+      const width = 1080;
+      const height = 430;
+      const margin = { top: 26, right: 58, bottom: 46, left: 64 };
+      const chartWidth = width - margin.left - margin.right;
+      const chartHeight = height - margin.top - margin.bottom;
+      const highs = candles.map(item => Number(item.high));
+      const lows = candles.map(item => Number(item.low));
+      const maxPrice = Math.max(...highs);
+      const minPrice = Math.min(...lows);
+      const priceRange = Math.max(maxPrice - minPrice, maxPrice * 0.02, 1);
+      const paddedMax = maxPrice + priceRange * 0.06;
+      const paddedMin = Math.max(0, minPrice - priceRange * 0.06);
+      const slot = chartWidth / candles.length;
+      const candleWidth = Math.max(4, Math.min(16, slot * 0.58));
+
+      function yPrice(value) {
+        return margin.top + ((paddedMax - value) / (paddedMax - paddedMin)) * chartHeight;
+      }
+
+      const grid = createSvg("g", { class: "grid" });
+      const tickCount = 5;
+      for (let index = 0; index <= tickCount; index += 1) {
+        const value = paddedMin + ((paddedMax - paddedMin) / tickCount) * index;
+        const y = yPrice(value);
+        grid.appendChild(createSvg("line", {
+          x1: margin.left,
+          y1: y,
+          x2: width - margin.right,
+          y2: y,
+          class: "grid-line"
+        }));
+
+        const label = createSvg("text", {
+          x: width - margin.right + 8,
+          y: y + 4,
+          "text-anchor": "start"
+        });
+        label.textContent = value.toFixed(2);
+        grid.appendChild(label);
+      }
+      targetSvg.appendChild(grid);
+
+      const axis = createSvg("g", { class: "axis" });
+      axis.appendChild(createSvg("line", {
+        x1: margin.left,
+        y1: margin.top + chartHeight,
+        x2: width - margin.right,
+        y2: margin.top + chartHeight,
+        class: "axis-line"
+      }));
+      axis.appendChild(createSvg("line", {
+        x1: margin.left,
+        y1: margin.top,
+        x2: margin.left,
+        y2: margin.top + chartHeight,
+        class: "axis-line"
+      }));
+      targetSvg.appendChild(axis);
+
+      const group = createSvg("g", { class: "candles" });
+      const labelStep = Math.max(1, Math.ceil(candles.length / 7));
+
+      candles.forEach((item, index) => {
+        const previous = index > 0
+          ? candles[index - 1]
+          : previousKlineItem(kline || [], item.date);
+        const open = Number(item.open);
+        const high = Number(item.high);
+        const low = Number(item.low);
+        const close = Number(item.close);
+        const changePct = previous ? ((close / Number(previous.close) - 1) * 100) : null;
+        const isUp = close >= open;
+        const color = isUp ? "#dc2626" : "#0f766e";
+        const xCenter = margin.left + slot * index + slot / 2;
+        const yOpen = yPrice(open);
+        const yClose = yPrice(close);
+        const bodyTop = Math.min(yOpen, yClose);
+        const bodyHeight = Math.max(2, Math.abs(yOpen - yClose));
+
+        group.appendChild(createSvg("line", {
+          class: "wick",
+          x1: xCenter,
+          y1: yPrice(high),
+          x2: xCenter,
+          y2: yPrice(low),
+          stroke: color,
+          "stroke-width": 1.4
+        }));
+
+        const body = createSvg("rect", {
+          class: "candle",
+          x: xCenter - candleWidth / 2,
+          y: bodyTop,
+          width: candleWidth,
+          height: bodyHeight,
+          rx: 1,
+          fill: color,
+          tabindex: 0,
+          "data-change-pct": changePct === null ? "" : changePct.toFixed(2),
+          "aria-label": `${item.date} 开${open} 高${high} 低${low} 收${close}`
+        });
+        body.addEventListener("mousemove", event => showKlineTooltip(event, item));
+        body.addEventListener("mouseleave", hideTooltip);
+        body.addEventListener("focus", event => showKlineTooltip(event, item));
+        body.addEventListener("blur", hideTooltip);
+        group.appendChild(body);
+
+        if (index === 0 || index === candles.length - 1 || index % labelStep === 0) {
+          const label = createSvg("text", {
+            class: "x-label",
+            x: xCenter,
+            y: height - 18,
+            "text-anchor": "middle"
+          });
+          label.textContent = item.date.slice(5);
+          group.appendChild(label);
+        }
+      });
+
+      targetSvg.appendChild(group);
+
+      const crosshair = createSvg("g", {
+        class: "crosshair",
+        visibility: "hidden"
+      });
+      const verticalLine = createSvg("line", {
+        class: "crosshair-line",
+        y1: margin.top,
+        y2: margin.top + chartHeight
+      });
+      const horizontalLine = createSvg("line", {
+        class: "crosshair-line",
+        x1: margin.left,
+        x2: width - margin.right
+      });
+      const priceLabelBg = createSvg("rect", {
+        class: "crosshair-label-bg",
+        width: 78,
+        height: 20
+      });
+      const priceLabel = createSvg("text", {
+        class: "crosshair-label",
+        "text-anchor": "start"
+      });
+
+      crosshair.appendChild(verticalLine);
+      crosshair.appendChild(horizontalLine);
+      crosshair.appendChild(priceLabelBg);
+      crosshair.appendChild(priceLabel);
+      targetSvg.appendChild(crosshair);
+
+      const hitArea = createSvg("rect", {
+        class: "kline-hit-area",
+        x: margin.left,
+        y: margin.top,
+        width: chartWidth,
+        height: chartHeight,
+        fill: "transparent",
+        "pointer-events": "all"
+      });
+
+      hitArea.addEventListener("mousemove", event => {
+        const cursor = svgCursorPoint(targetSvg, event);
+        if (!cursor) return;
+
+        const cursorX = Math.max(margin.left, Math.min(width - margin.right, cursor.x));
+        const cursorY = Math.max(margin.top, Math.min(margin.top + chartHeight, cursor.y));
+        const nearestIndex = Math.max(
+          0,
+          Math.min(candles.length - 1, Math.round((cursorX - margin.left - slot / 2) / slot))
+        );
+        const item = candles[nearestIndex];
+        const previous = nearestIndex > 0
+          ? candles[nearestIndex - 1]
+          : previousKlineItem(kline || [], item.date);
+        const changePct = previous
+          ? ((Number(item.close) / Number(previous.close) - 1) * 100).toFixed(2)
+          : "";
+        const xCenter = margin.left + slot * nearestIndex + slot / 2;
+        const priceAtCursor = paddedMax - ((cursorY - margin.top) / chartHeight) * (paddedMax - paddedMin);
+
+        verticalLine.setAttribute("x1", xCenter);
+        verticalLine.setAttribute("x2", xCenter);
+        horizontalLine.setAttribute("y1", cursorY);
+        horizontalLine.setAttribute("y2", cursorY);
+        priceLabelBg.setAttribute("x", width - margin.right + 4);
+        priceLabelBg.setAttribute("y", cursorY - 10);
+        priceLabel.setAttribute("x", width - margin.right + 9);
+        priceLabel.setAttribute("y", cursorY + 4);
+        priceLabel.textContent = priceAtCursor.toFixed(2);
+        crosshair.setAttribute("visibility", "visible");
+        showKlineTooltip(event, item, changePct);
+      });
+
+      hitArea.addEventListener("mouseleave", () => {
+        crosshair.setAttribute("visibility", "hidden");
+        hideTooltip();
+      });
+
+      targetSvg.appendChild(hitArea);
+    }
+
+    function recentKline(kline) {
+      const valid = kline.filter(item => item.date && Number.isFinite(Number(item.close)));
+      if (!valid.length) return [];
+
+      const last = valid[valid.length - 1];
+      const end = new Date(`${last.date}T00:00:00`);
+      const start = new Date(end);
+      start.setMonth(start.getMonth() - 2);
+
+      return valid.filter(item => {
+        const date = new Date(`${item.date}T00:00:00`);
+        return date >= start && date <= end;
+      });
+    }
+
+    function previousKlineItem(kline, date) {
+      const index = kline.findIndex(item => item.date === date);
+      if (index <= 0) return null;
+      return kline[index - 1];
+    }
+
+    function rowBaseClose(row) {
+      return row.base_close ?? row.base_close_qfq;
+    }
+
+    function rowEndClose(row) {
+      return row.end_close ?? row.end_close_qfq;
+    }
+
+    function rowLabel(row) {
+      if (row.label) return row.label;
+      if (row.period_type === "trading_day") return `${row.period_value}交易日`;
+      return `${row.months ?? row.period_value}月`;
+    }
+
+    function showTooltip(event, row) {
+      tooltip.innerHTML = `
+        <strong>${escapeHtml(rowLabel(row))}涨幅 ${formatPct(row.return_pct)}</strong>
+        起点日期：${escapeHtml(row.target_date)}<br>
+        起点前一交易日：${escapeHtml(row.base_trade_date)}<br>
+        起点前一日收盘：${formatPrice(rowBaseClose(row))}<br>
+        终点：${escapeHtml(row.end_trade_date)}<br>
+        终点收盘：${formatPrice(rowEndClose(row))}
+      `;
+      tooltip.style.display = "block";
+      const x = event.clientX || event.target.getBoundingClientRect().left;
+      const y = event.clientY || event.target.getBoundingClientRect().top;
+      tooltip.style.left = `${Math.min(x + 14, window.innerWidth - 230)}px`;
+      tooltip.style.top = `${Math.max(y - 22, 12)}px`;
+    }
+
+    function hideTooltip() {
+      tooltip.style.display = "none";
+    }
+
+    function showKlineTooltip(event, item, changePctOverride = null) {
+      const changePct = changePctOverride ?? event.target.dataset.changePct;
+      tooltip.innerHTML = `
+        <strong>${escapeHtml(item.date)}</strong>
+        开盘：${formatPrice(item.open)}<br>
+        最高：${formatPrice(item.high)}<br>
+        最低：${formatPrice(item.low)}<br>
+        收盘：${formatPrice(item.close)}<br>
+        涨跌幅：${changePct ? `${changePct}%` : "-"}
+      `;
+      tooltip.style.display = "block";
+      const x = event.clientX || event.target.getBoundingClientRect().left;
+      const y = event.clientY || event.target.getBoundingClientRect().top;
+      tooltip.style.left = `${Math.min(x + 14, window.innerWidth - 230)}px`;
+      tooltip.style.top = `${Math.max(y - 22, 12)}px`;
+    }
+
+    function escapeHtml(value) {
+      return String(value ?? "")
+        .replaceAll("&", "&amp;")
+        .replaceAll("<", "&lt;")
+        .replaceAll(">", "&gt;")
+        .replaceAll('"', "&quot;")
+        .replaceAll("'", "&#039;");
+    }
+
+    addForm.addEventListener("submit", async event => {
+      event.preventDefault();
+      const query = stockSearch.value.trim();
+      const body = state.selectedCandidate
+        ? { code: state.selectedCandidate.code, name: state.selectedCandidate.name }
+        : { query };
+
+      try {
+        setBusy(true);
+        setStatus("正在添加自选股...");
+        const result = await api("/api/stocks", {
+          method: "POST",
+          body: JSON.stringify(body)
+        });
+        addForm.reset();
+        state.selectedCandidate = null;
+        hideCandidates();
+        await loadStocks(result.stock.code);
+        setStatus("已添加自选股");
+      } catch (error) {
+        if (error.payload?.candidates?.length) {
+          renderCandidates(error.payload.candidates, "请选择一个候选股票");
+          setStatus("找到多个候选股票，请先选择一个", true);
+        } else {
+          setStatus(error.message, true);
+        }
+      } finally {
+        setBusy(false);
+      }
+    });
+
+    stockSearch.addEventListener("input", () => {
+      window.clearTimeout(state.searchTimer);
+      state.selectedCandidate = null;
+      state.searchTimer = window.setTimeout(() => {
+        searchCandidates(stockSearch.value);
+      }, 240);
+    });
+
+    stockSearch.addEventListener("focus", () => {
+      if (stockSearch.value.trim()) {
+        searchCandidates(stockSearch.value);
+      }
+    });
+
+    document.addEventListener("click", event => {
+      if (!addForm.contains(event.target)) {
+        hideCandidates();
+      }
+    });
+
+    refreshBtn.addEventListener("click", async () => {
+      if (!state.selectedCode) return;
+
+      try {
+        setBusy(true);
+        setStatus(`正在获取 ${state.selectedCode} 的 mootdx 数据...`);
+        const stock = await api(`/api/stocks/${state.selectedCode}/refresh`, { method: "POST" });
+        state.selectedStock = stock;
+        await loadStocks(state.selectedCode);
+        setStatus(`${stock.code} 数据已保存到本地`);
+      } catch (error) {
+        setStatus(error.message, true);
+      } finally {
+        setBusy(false);
+      }
+    });
+
+    deleteBtn.addEventListener("click", async () => {
+      if (!state.selectedCode || state.selectedCode === "002552") return;
+
+      try {
+        setBusy(true);
+        setStatus("正在删除自选股...");
+        await api(`/api/stocks/${state.selectedCode}`, { method: "DELETE" });
+        state.selectedCode = null;
+        await loadStocks();
+        setStatus("已删除自选股");
+      } catch (error) {
+        setStatus(error.message, true);
+      } finally {
+        setBusy(false);
+      }
+    });
+
+    loadStocks().catch(error => setStatus(error.message, true));
+  </script>
+</body>
+</html>
