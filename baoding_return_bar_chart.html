@@ -484,7 +484,8 @@
 
     .kline-wrap svg {
       min-width: 900px;
-      height: 520px;
+      height: auto;
+      display: block;
     }
 
     .candle {
@@ -529,6 +530,23 @@
 
     .kline-hit-area {
       cursor: crosshair;
+    }
+
+    .kline-panel-title {
+      fill: var(--axis);
+      font-size: 13px;
+      font-weight: 800;
+    }
+
+    .kline-panel-separator {
+      stroke: var(--line);
+      stroke-width: 1;
+    }
+
+    .kline-empty-text {
+      fill: var(--muted);
+      font-size: 13px;
+      font-weight: 700;
     }
 
     .kline-empty {
@@ -674,9 +692,9 @@
           <svg id="barChart" viewBox="0 0 1080 530" role="img" aria-label="涨幅柱状图"></svg>
         </div>
 
-        <div class="kline-panel" id="stockKlinePanel">
+        <div class="kline-panel" id="klinePanel">
           <div class="kline-head">
-            <span>个股 K 线</span>
+            <span>K 线对比</span>
             <div class="kline-controls">
               <label for="klineMonths">显示范围</label>
               <select id="klineMonths">
@@ -695,27 +713,7 @@
             </div>
           </div>
           <div class="kline-wrap" id="klineWrap">
-            <svg id="klineChart" viewBox="0 0 1080 520" role="img" aria-label="最近2个月K线图"></svg>
-          </div>
-        </div>
-
-        <div class="kline-panel" id="shIndexPanel">
-          <div class="kline-head">
-            <span>上证指数 K 线</span>
-            <span id="shIndexRange" class="pill">-</span>
-          </div>
-          <div class="kline-wrap" id="shIndexWrap">
-            <svg id="shIndexChart" viewBox="0 0 1080 520" role="img" aria-label="上证指数最近2个月K线图"></svg>
-          </div>
-        </div>
-
-        <div class="kline-panel" id="szIndexPanel">
-          <div class="kline-head">
-            <span>深证成指 K 线</span>
-            <span id="szIndexRange" class="pill">-</span>
-          </div>
-          <div class="kline-wrap" id="szIndexWrap">
-            <svg id="szIndexChart" viewBox="0 0 1080 520" role="img" aria-label="深证成指最近2个月K线图"></svg>
+            <svg id="klineChart" viewBox="0 0 1080 1252" role="img" aria-label="个股和指数K线对比图"></svg>
           </div>
         </div>
       </section>
@@ -750,21 +748,12 @@
     const selectedMeta = document.getElementById("selectedMeta");
     const chartWrap = document.getElementById("chartWrap");
     const svg = document.getElementById("barChart");
-    const stockKlinePanel = document.getElementById("stockKlinePanel");
     const klineMonths = document.getElementById("klineMonths");
     const klineSpacing = document.getElementById("klineSpacing");
     const klineSpacingValue = document.getElementById("klineSpacingValue");
     const klineWrap = document.getElementById("klineWrap");
     const klineSvg = document.getElementById("klineChart");
     const klineRange = document.getElementById("klineRange");
-    const shIndexPanel = document.getElementById("shIndexPanel");
-    const shIndexWrap = document.getElementById("shIndexWrap");
-    const shIndexSvg = document.getElementById("shIndexChart");
-    const shIndexRange = document.getElementById("shIndexRange");
-    const szIndexPanel = document.getElementById("szIndexPanel");
-    const szIndexWrap = document.getElementById("szIndexWrap");
-    const szIndexSvg = document.getElementById("szIndexChart");
-    const szIndexRange = document.getElementById("szIndexRange");
     const statusNode = document.getElementById("status");
     const tooltip = document.getElementById("tooltip");
 
@@ -939,7 +928,6 @@
     function renderSelected(stock) {
       selectedTitle.textContent = stockLabel(stock);
       selectedCode.textContent = stock.code;
-      orderIndexPanels(stock.code);
       deleteBtn.style.display = stock.code === "002552" ? "none" : "inline-flex";
 
       const meta = stock.meta || {};
@@ -962,21 +950,6 @@
 
       renderChart(rows);
       renderAllKlines(kline, indices);
-    }
-
-    function orderIndexPanels(code) {
-      const parent = shIndexPanel.parentNode;
-      const isShanghai = String(code || "").startsWith("6");
-      const firstIndexPanel = isShanghai ? shIndexPanel : szIndexPanel;
-      const secondIndexPanel = isShanghai ? szIndexPanel : shIndexPanel;
-
-      if (stockKlinePanel.nextSibling !== firstIndexPanel) {
-        parent.insertBefore(firstIndexPanel, stockKlinePanel.nextSibling);
-      }
-
-      if (firstIndexPanel.nextSibling !== secondIndexPanel) {
-        parent.insertBefore(secondIndexPanel, firstIndexPanel.nextSibling);
-      }
     }
 
     function renderEmpty(text) {
@@ -1124,77 +1097,204 @@
     }
 
     function renderAllKlines(kline, indices) {
-      renderKline(kline, {
-        svg: klineSvg,
-        wrap: klineWrap,
-        range: klineRange,
-        emptyText: "暂无个股K线数据"
-      });
-      renderKline(indices?.sh?.kline || [], {
-        svg: shIndexSvg,
-        wrap: shIndexWrap,
-        range: shIndexRange,
-        emptyText: "暂无上证指数K线数据"
-      });
-      renderKline(indices?.sz?.kline || [], {
-        svg: szIndexSvg,
-        wrap: szIndexWrap,
-        range: szIndexRange,
-        emptyText: "暂无深证成指K线数据"
-      });
-    }
+      klineSvg.innerHTML = "";
+      klineWrap.querySelector(".kline-empty")?.remove();
 
-    function renderKline(kline, target) {
-      const targetSvg = target.svg;
-      const targetWrap = target.wrap;
-      const targetRange = target.range;
+      const panels = orderedKlinePanels(kline, indices).map(panel => ({
+        ...panel,
+        candles: recentKline(panel.kline || [], state.klineMonths)
+      }));
+      const allDates = [...new Set(panels.flatMap(panel => panel.candles.map(item => item.date)))].sort();
 
-      targetSvg.innerHTML = "";
-      targetWrap.querySelector(".kline-empty")?.remove();
-
-      const candles = recentKline(kline || [], state.klineMonths);
-      if (!candles.length) {
-        targetSvg.style.display = "none";
-        targetRange.textContent = "-";
+      if (!allDates.length) {
+        klineSvg.style.display = "none";
+        klineRange.textContent = "-";
         const empty = document.createElement("div");
         empty.className = "kline-empty";
-        empty.textContent = target.emptyText || "暂无K线数据";
-        targetWrap.appendChild(empty);
+        empty.textContent = "暂无K线数据";
+        klineWrap.appendChild(empty);
         return;
       }
 
-      targetSvg.style.display = "block";
-      targetRange.textContent = `${candles[0].date} 至 ${candles[candles.length - 1].date}`;
+      klineSvg.style.display = "block";
+      klineRange.textContent = `${allDates[0]} 至 ${allDates[allDates.length - 1]}`;
 
-      const wrapStyle = getComputedStyle(targetWrap);
+      const wrapStyle = getComputedStyle(klineWrap);
       const wrapPaddingX = (Number.parseFloat(wrapStyle.paddingLeft) || 0) + (Number.parseFloat(wrapStyle.paddingRight) || 0);
-      const baseWidth = Math.max(720, targetWrap.clientWidth - wrapPaddingX);
-      const height = 520;
-      const margin = { top: 26, right: 58, bottom: 46, left: 64 };
+      const margin = { top: 30, right: 94, bottom: 36, left: 64 };
+      const panelHeight = 390;
+      const panelGap = 28;
+      const height = panels.length * panelHeight + Math.max(0, panels.length - 1) * panelGap;
+      const baseWidth = Math.max(720, klineWrap.clientWidth - wrapPaddingX);
       const baseChartWidth = baseWidth - margin.left - margin.right;
-      const baseSlot = baseChartWidth / candles.length;
+      const baseSlot = baseChartWidth / allDates.length;
       const candleWidth = Math.max(4, Math.min(16, baseSlot * 0.58));
       const slot = candleWidth + state.klineGap;
-      const dataWidth = Math.max(candleWidth * candles.length + state.klineGap * Math.max(0, candles.length - 1), 1);
+      const dataWidth = Math.max(slot * allDates.length, 1);
       const width = Math.max(baseWidth, margin.left + margin.right + dataWidth);
       const chartWidth = width - margin.left - margin.right;
-      const volumeHeight = 82;
-      const volumeGap = 22;
-      const chartHeight = height - margin.top - margin.bottom - volumeHeight - volumeGap;
+      const dateIndex = new Map(allDates.map((date, index) => [date, index]));
+      const crosshair = createKlineCrosshair(width, height, margin);
+
+      klineSvg.setAttribute("viewBox", `0 0 ${width} ${height}`);
+      klineSvg.style.minWidth = `${width}px`;
+      klineSvg.style.height = `${height}px`;
+
+      panels.forEach((panel, index) => {
+        drawKlinePanel({
+          svgNode: klineSvg,
+          panel,
+          panelIndex: index,
+          yOffset: index * (panelHeight + panelGap),
+          panelHeight,
+          panelGap,
+          width,
+          chartWidth,
+          margin,
+          allDates,
+          dateIndex,
+          candleWidth,
+          slot,
+          crosshair
+        });
+      });
+
+      klineSvg.appendChild(crosshair.group);
+    }
+
+    function orderedKlinePanels(kline, indices) {
+      const shPanel = {
+        key: "sh",
+        title: "上证指数",
+        kline: indices?.sh?.kline || [],
+        emptyText: "暂无上证指数K线数据"
+      };
+      const szPanel = {
+        key: "sz",
+        title: "深证成指",
+        kline: indices?.sz?.kline || [],
+        emptyText: "暂无深证成指K线数据"
+      };
+      const isShanghai = String(state.selectedStock?.code || state.selectedCode || "").startsWith("6");
+      const indexPanels = isShanghai ? [shPanel, szPanel] : [szPanel, shPanel];
+
+      return [
+        {
+          key: "stock",
+          title: `${stockLabel(state.selectedStock || { code: "个股" })} 个股`,
+          kline: kline || [],
+          emptyText: "暂无个股K线数据"
+        },
+        ...indexPanels
+      ];
+    }
+
+    function createKlineCrosshair(width, height, margin) {
+      const group = createSvg("g", {
+        class: "crosshair",
+        visibility: "hidden"
+      });
+      const verticalLine = createSvg("line", {
+        class: "crosshair-line",
+        y1: margin.top,
+        y2: height - margin.bottom
+      });
+      const horizontalLine = createSvg("line", {
+        class: "crosshair-line",
+        x1: margin.left,
+        x2: width - margin.right
+      });
+      const priceLabelBg = createSvg("rect", {
+        class: "crosshair-label-bg",
+        width: 86,
+        height: 20
+      });
+      const priceLabel = createSvg("text", {
+        class: "crosshair-label",
+        "text-anchor": "start"
+      });
+
+      group.appendChild(verticalLine);
+      group.appendChild(horizontalLine);
+      group.appendChild(priceLabelBg);
+      group.appendChild(priceLabel);
+
+      return {
+        group,
+        verticalLine,
+        horizontalLine,
+        priceLabelBg,
+        priceLabel
+      };
+    }
+
+    function drawKlinePanel(config) {
+      const {
+        svgNode,
+        panel,
+        panelIndex,
+        yOffset,
+        panelHeight,
+        panelGap,
+        width,
+        chartWidth,
+        margin,
+        allDates,
+        dateIndex,
+        candleWidth,
+        slot,
+        crosshair
+      } = config;
+
+      if (panelIndex > 0) {
+        svgNode.appendChild(createSvg("line", {
+          class: "kline-panel-separator",
+          x1: margin.left,
+          y1: yOffset - panelGap / 2,
+          x2: width - margin.right,
+          y2: yOffset - panelGap / 2
+        }));
+      }
+
+      const group = createSvg("g", {
+        class: "kline-panel-group",
+        transform: `translate(0 ${yOffset})`
+      });
+      const title = createSvg("text", {
+        class: "kline-panel-title",
+        x: margin.left,
+        y: 18
+      });
+      title.textContent = panel.title;
+      group.appendChild(title);
+
+      if (!panel.candles.length) {
+        const empty = createSvg("text", {
+          class: "kline-empty-text",
+          x: margin.left,
+          y: panelHeight / 2
+        });
+        empty.textContent = panel.emptyText;
+        group.appendChild(empty);
+        svgNode.appendChild(group);
+        return;
+      }
+
+      const volumeHeight = 62;
+      const volumeGap = 18;
+      const chartHeight = panelHeight - margin.top - margin.bottom - volumeHeight - volumeGap;
       const priceBottom = margin.top + chartHeight;
       const volumeTop = priceBottom + volumeGap;
       const volumeBottom = volumeTop + volumeHeight;
-      const highs = candles.map(item => Number(item.high));
-      const lows = candles.map(item => Number(item.low));
-      const volumes = candles.map(item => Number(item.volume || 0));
+      const highs = panel.candles.map(item => Number(item.high));
+      const lows = panel.candles.map(item => Number(item.low));
+      const volumes = panel.candles.map(item => Number(item.volume || 0));
       const maxPrice = Math.max(...highs);
       const minPrice = Math.min(...lows);
       const maxVolume = Math.max(...volumes, 1);
       const priceRange = Math.max(maxPrice - minPrice, maxPrice * 0.02, 1);
       const paddedMax = maxPrice + priceRange * 0.06;
       const paddedMin = Math.max(0, minPrice - priceRange * 0.06);
-      targetSvg.setAttribute("viewBox", `0 0 ${width} ${height}`);
-      targetSvg.style.minWidth = `${width}px`;
 
       function yPrice(value) {
         return margin.top + ((paddedMax - value) / (paddedMax - paddedMin)) * chartHeight;
@@ -1205,7 +1305,7 @@
       }
 
       const grid = createSvg("g", { class: "grid" });
-      const tickCount = 5;
+      const tickCount = 4;
       for (let index = 0; index <= tickCount; index += 1) {
         const value = paddedMin + ((paddedMax - paddedMin) / tickCount) * index;
         const y = yPrice(value);
@@ -1225,7 +1325,7 @@
         label.textContent = value.toFixed(2);
         grid.appendChild(label);
       }
-      targetSvg.appendChild(grid);
+      group.appendChild(grid);
 
       const axis = createSvg("g", { class: "axis" });
       axis.appendChild(createSvg("line", {
@@ -1251,23 +1351,23 @@
       }));
       const volumeTitle = createSvg("text", {
         x: margin.left,
-        y: volumeTop - 7,
+        y: volumeTop - 6,
         fill: "#64748b",
         "font-size": 12,
         "font-weight": 800
       });
       volumeTitle.textContent = "成交量";
       axis.appendChild(volumeTitle);
-      targetSvg.appendChild(axis);
+      group.appendChild(axis);
 
-      const group = createSvg("g", { class: "candles" });
+      const candleGroup = createSvg("g", { class: "candles" });
       const volumeGroup = createSvg("g", { class: "volumes" });
-      const labelStep = Math.max(1, Math.ceil(candles.length / 7));
+      const labelStep = Math.max(1, Math.ceil(allDates.length / 7));
 
-      candles.forEach((item, index) => {
+      panel.candles.forEach((item, index) => {
         const previous = index > 0
-          ? candles[index - 1]
-          : previousKlineItem(kline || [], item.date);
+          ? panel.candles[index - 1]
+          : previousKlineItem(panel.kline || [], item.date);
         const open = Number(item.open);
         const high = Number(item.high);
         const low = Number(item.low);
@@ -1276,13 +1376,13 @@
         const changePct = previous ? ((close / Number(previous.close) - 1) * 100) : null;
         const isUp = close >= open;
         const color = isUp ? "#dc2626" : "#0f766e";
-        const xCenter = margin.left + slot * index + slot / 2;
+        const xCenter = margin.left + slot * dateIndex.get(item.date) + slot / 2;
         const yOpen = yPrice(open);
         const yClose = yPrice(close);
         const bodyTop = Math.min(yOpen, yClose);
         const bodyHeight = Math.max(2, Math.abs(yOpen - yClose));
 
-        group.appendChild(createSvg("line", {
+        candleGroup.appendChild(createSvg("line", {
           class: "wick",
           x1: xCenter,
           y1: yPrice(high),
@@ -1292,7 +1392,7 @@
           "stroke-width": 1.4
         }));
 
-        const body = createSvg("rect", {
+        candleGroup.appendChild(createSvg("rect", {
           class: "candle",
           x: xCenter - candleWidth / 2,
           y: bodyTop,
@@ -1302,13 +1402,8 @@
           fill: color,
           tabindex: 0,
           "data-change-pct": changePct === null ? "" : changePct.toFixed(2),
-          "aria-label": `${item.date} 开${open} 高${high} 低${low} 收${close}`
-        });
-        body.addEventListener("mousemove", event => showKlineTooltip(event, item));
-        body.addEventListener("mouseleave", hideTooltip);
-        body.addEventListener("focus", event => showKlineTooltip(event, item));
-        body.addEventListener("blur", hideTooltip);
-        group.appendChild(body);
+          "aria-label": `${panel.title} ${item.date} 开${open} 高${high} 低${low} 收${close}`
+        }));
 
         const volumeY = yVolume(volume);
         volumeGroup.appendChild(createSvg("rect", {
@@ -1319,51 +1414,23 @@
           height: Math.max(1, volumeBottom - volumeY),
           fill: color
         }));
-
-        if (index === 0 || index === candles.length - 1 || index % labelStep === 0) {
-          const label = createSvg("text", {
-            class: "x-label",
-            x: xCenter,
-            y: volumeBottom + 24,
-            "text-anchor": "middle"
-          });
-          label.textContent = item.date.slice(5);
-          group.appendChild(label);
-        }
       });
 
-      targetSvg.appendChild(volumeGroup);
-      targetSvg.appendChild(group);
+      allDates.forEach((date, index) => {
+        if (index !== 0 && index !== allDates.length - 1 && index % labelStep !== 0) return;
 
-      const crosshair = createSvg("g", {
-        class: "crosshair",
-        visibility: "hidden"
-      });
-      const verticalLine = createSvg("line", {
-        class: "crosshair-line",
-        y1: margin.top,
-        y2: volumeBottom
-      });
-      const horizontalLine = createSvg("line", {
-        class: "crosshair-line",
-        x1: margin.left,
-        x2: width - margin.right
-      });
-      const priceLabelBg = createSvg("rect", {
-        class: "crosshair-label-bg",
-        width: 78,
-        height: 20
-      });
-      const priceLabel = createSvg("text", {
-        class: "crosshair-label",
-        "text-anchor": "start"
+        const label = createSvg("text", {
+          class: "x-label",
+          x: margin.left + slot * index + slot / 2,
+          y: volumeBottom + 24,
+          "text-anchor": "middle"
+        });
+        label.textContent = date.slice(5);
+        candleGroup.appendChild(label);
       });
 
-      crosshair.appendChild(verticalLine);
-      crosshair.appendChild(horizontalLine);
-      crosshair.appendChild(priceLabelBg);
-      crosshair.appendChild(priceLabel);
-      targetSvg.appendChild(crosshair);
+      group.appendChild(volumeGroup);
+      group.appendChild(candleGroup);
 
       const hitArea = createSvg("rect", {
         class: "kline-hit-area",
@@ -1376,44 +1443,71 @@
       });
 
       hitArea.addEventListener("mousemove", event => {
-        const cursor = svgCursorPoint(targetSvg, event);
+        const cursor = svgCursorPoint(svgNode, event);
         if (!cursor) return;
 
         const cursorX = Math.max(margin.left, Math.min(width - margin.right, cursor.x));
-        const cursorY = Math.max(margin.top, Math.min(priceBottom, cursor.y));
-        const nearestIndex = Math.max(
+        const localY = Math.max(margin.top, Math.min(priceBottom, cursor.y - yOffset));
+        const nearestDateIndex = Math.max(
           0,
-          Math.min(candles.length - 1, Math.round((cursorX - margin.left - slot / 2) / slot))
+          Math.min(allDates.length - 1, Math.round((cursorX - margin.left - slot / 2) / slot))
         );
-        const item = candles[nearestIndex];
-        const previous = nearestIndex > 0
-          ? candles[nearestIndex - 1]
-          : previousKlineItem(kline || [], item.date);
-        const changePct = previous
-          ? ((Number(item.close) / Number(previous.close) - 1) * 100).toFixed(2)
-          : "";
-        const xCenter = margin.left + slot * nearestIndex + slot / 2;
-        const priceAtCursor = paddedMax - ((cursorY - margin.top) / chartHeight) * (paddedMax - paddedMin);
+        const nearest = nearestPanelCandle(panel, nearestDateIndex, dateIndex);
+        if (!nearest) return;
 
-        verticalLine.setAttribute("x1", xCenter);
-        verticalLine.setAttribute("x2", xCenter);
-        horizontalLine.setAttribute("y1", cursorY);
-        horizontalLine.setAttribute("y2", cursorY);
-        priceLabelBg.setAttribute("x", width - margin.right + 4);
-        priceLabelBg.setAttribute("y", cursorY - 10);
-        priceLabel.setAttribute("x", width - margin.right + 9);
-        priceLabel.setAttribute("y", cursorY + 4);
-        priceLabel.textContent = priceAtCursor.toFixed(2);
-        crosshair.setAttribute("visibility", "visible");
-        showKlineTooltip(event, item, changePct);
+        const xCenter = margin.left + slot * dateIndex.get(nearest.item.date) + slot / 2;
+        const globalY = yOffset + localY;
+        const priceAtCursor = paddedMax - ((localY - margin.top) / chartHeight) * (paddedMax - paddedMin);
+
+        crosshair.verticalLine.setAttribute("x1", xCenter);
+        crosshair.verticalLine.setAttribute("x2", xCenter);
+        crosshair.horizontalLine.setAttribute("y1", globalY);
+        crosshair.horizontalLine.setAttribute("y2", globalY);
+        crosshair.priceLabelBg.setAttribute("x", width - margin.right + 4);
+        crosshair.priceLabelBg.setAttribute("y", globalY - 10);
+        crosshair.priceLabel.setAttribute("x", width - margin.right + 9);
+        crosshair.priceLabel.setAttribute("y", globalY + 4);
+        crosshair.priceLabel.textContent = priceAtCursor.toFixed(2);
+        crosshair.group.setAttribute("visibility", "visible");
+        showKlineTooltip(event, nearest.item, nearest.changePct, panel.title);
       });
 
       hitArea.addEventListener("mouseleave", () => {
-        crosshair.setAttribute("visibility", "hidden");
+        crosshair.group.setAttribute("visibility", "hidden");
         hideTooltip();
       });
 
-      targetSvg.appendChild(hitArea);
+      group.appendChild(hitArea);
+      svgNode.appendChild(group);
+    }
+
+    function nearestPanelCandle(panel, targetIndex, dateIndex) {
+      if (!panel.candles.length) return null;
+
+      let best = null;
+      panel.candles.forEach((item, index) => {
+        const itemIndex = dateIndex.get(item.date);
+        if (!Number.isFinite(itemIndex)) return;
+
+        const distance = Math.abs(itemIndex - targetIndex);
+        if (!best || distance < best.distance) {
+          best = { item, index, distance };
+        }
+      });
+
+      if (!best) return null;
+
+      const previous = best.index > 0
+        ? panel.candles[best.index - 1]
+        : previousKlineItem(panel.kline || [], best.item.date);
+      const changePct = previous
+        ? ((Number(best.item.close) / Number(previous.close) - 1) * 100).toFixed(2)
+        : "";
+
+      return {
+        item: best.item,
+        changePct
+      };
     }
 
     function recentKline(kline, months) {
@@ -1471,15 +1565,17 @@
       tooltip.style.display = "none";
     }
 
-    function showKlineTooltip(event, item, changePctOverride = null) {
+    function showKlineTooltip(event, item, changePctOverride = null, title = "") {
       const changePct = changePctOverride ?? event.target.dataset.changePct;
+      const changeText = changePct !== null && changePct !== undefined && changePct !== "" ? `${changePct}%` : "-";
+      const heading = title ? `${title} ${item.date}` : item.date;
       tooltip.innerHTML = `
-        <strong>${escapeHtml(item.date)}</strong>
+        <strong>${escapeHtml(heading)}</strong>
         开盘：${formatPrice(item.open)}<br>
         最高：${formatPrice(item.high)}<br>
         最低：${formatPrice(item.low)}<br>
         收盘：${formatPrice(item.close)}<br>
-        涨跌幅：${changePct ? `${changePct}%` : "-"}<br>
+        涨跌幅：${changeText}<br>
         成交量：${formatVolume(item.volume)}<br>
         成交额：${formatAmount(item.amount)}
       `;
