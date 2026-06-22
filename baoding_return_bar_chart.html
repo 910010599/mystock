@@ -285,11 +285,13 @@
 
     .stock-group-section {
       display: block;
-      margin-bottom: 10px;
-      overflow: hidden;
+      position: relative;
+      margin: 0 2px 14px 12px;
+      overflow: visible;
       border: 1px solid var(--line);
       border-radius: 8px;
       background: #fff;
+      box-shadow: 0 8px 18px rgba(15, 23, 42, 0.08);
     }
 
     .stock-group-section:last-child {
@@ -305,13 +307,30 @@
       align-items: center;
       justify-content: space-between;
       gap: 8px;
+      width: calc(100% + 12px);
       min-height: 34px;
-      padding: 7px 14px;
-      border-bottom: 1px solid var(--grid);
-      background: #f8fafc;
+      margin-left: -12px;
+      padding: 7px 12px 7px 14px;
+      border: 1px solid rgba(245, 158, 11, 0.38);
+      border-left: 3px solid var(--amber);
+      border-radius: 8px 6px 6px 0;
+      background: linear-gradient(180deg, #fff7ed 0%, #fffbeb 100%);
+      box-shadow: 0 6px 14px rgba(180, 83, 9, 0.18);
       color: var(--amber);
       font-size: 12px;
       font-weight: 800;
+    }
+
+    .stock-group-head::after {
+      content: "";
+      position: absolute;
+      left: -1px;
+      bottom: -7px;
+      width: 10px;
+      height: 7px;
+      background: #b45309;
+      clip-path: polygon(0 0, 100% 0, 100% 100%);
+      opacity: 0.45;
     }
 
     .stock-group-head.empty {
