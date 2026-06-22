@@ -517,7 +517,7 @@ def get_index_klines(client, stock_end_date: str) -> dict:
     return indices
 
 
-def calculate_returns(symbol: str) -> dict:
+def calculate_returns(symbol: str, indices: dict | None = None) -> dict:
     client, server, raw = connect_client(symbol)
     prices = raw.sort_index().copy()
     for column in ("open", "high", "low", "close"):
@@ -601,7 +601,7 @@ def calculate_returns(symbol: str) -> dict:
     return {
         "rows": rows,
         "kline": kline,
-        "indices": get_index_klines(client, latest_dt.date().isoformat()),
+        "indices": indices if indices is not None else get_index_klines(client, latest_dt.date().isoformat()),
         "meta": {
             "symbol": symbol,
             "server": f"{server[0]}:{server[1]}",
@@ -667,6 +667,10 @@ class StockAppHandler(SimpleHTTPRequestHandler):
 
         if path == "/api/stocks":
             self.add_stock()
+            return
+
+        if path == "/api/stocks/refresh-all":
+            self.refresh_all_stocks()
             return
 
         match = re.fullmatch(r"/api/stocks/(\d{6})/refresh", path)
@@ -777,7 +781,56 @@ class StockAppHandler(SimpleHTTPRequestHandler):
             self.send_error_json(HTTPStatus.BAD_GATEWAY, f"获取行情失败：{exc}")
             return
 
-        last_updated = now_text()
+        detail = self.persist_refresh_result(stock, result)
+        save_store(store)
+        detail.update(stock)
+        detail["indices"] = result["indices"]
+        detail["stocks"] = store["stocks"]
+        self.send_json(detail)
+
+    def refresh_all_stocks(self) -> None:
+        store = load_store()
+        stocks = store["stocks"]
+        refreshed = []
+        failed = []
+        indices = None
+        index_error = None
+
+        try:
+            client, _server = connect_quotes_client()
+            indices = fetch_index_klines(client)
+            save_indices(indices)
+        except Exception as exc:  # noqa: BLE001 - keep stock refresh attempts useful.
+            index_error = str(exc)
+            indices = load_indices()
+
+        shared_indices = indices or None
+        for stock in stocks:
+            code = stock.get("code")
+            try:
+                result = calculate_returns(code, indices=shared_indices)
+                if shared_indices is None and result.get("indices"):
+                    shared_indices = result["indices"]
+                self.persist_refresh_result(stock, result)
+                refreshed.append({"code": code, "name": stock.get("name")})
+            except Exception as exc:  # noqa: BLE001 - report per-stock failures.
+                failed.append({"code": code, "name": stock.get("name"), "error": str(exc)})
+
+        save_store(store)
+        self.send_json(
+            {
+                "stocks": store["stocks"],
+                "total": len(stocks),
+                "updated_count": len(refreshed),
+                "failed_count": len(failed),
+                "updated": refreshed,
+                "failed": failed,
+                "index_error": index_error,
+            }
+        )
+
+    def persist_refresh_result(self, stock: dict, result: dict) -> dict:
+        code = normalize_code(stock.get("code"))
         detail = {
             "code": code,
             "name": stock.get("name") or code,
@@ -785,15 +838,11 @@ class StockAppHandler(SimpleHTTPRequestHandler):
             "rows": result["rows"],
             "kline": result["kline"],
             "meta": result["meta"],
-            "last_updated": last_updated,
+            "last_updated": now_text(),
         }
         stock.update(stock_summary(stock, detail))
         save_stock_detail(detail)
-        save_store(store)
-        detail.update(stock)
-        detail["indices"] = result["indices"]
-        detail["stocks"] = store["stocks"]
-        self.send_json(detail)
+        return detail
 
     def read_json(self) -> dict:
         length = int(self.headers.get("Content-Length") or 0)

@@ -959,6 +959,7 @@
           </div>
           <div class="actions">
             <button id="refreshBtn" class="btn" type="button">↻ 获取数据</button>
+            <button id="refreshAllBtn" class="btn secondary" type="button">↻ 刷新全部</button>
             <button id="deleteBtn" class="btn danger" type="button">删除</button>
           </div>
         </div>
@@ -1042,6 +1043,7 @@
     const stockSearch = document.getElementById("stockSearch");
     const searchResults = document.getElementById("searchResults");
     const refreshBtn = document.getElementById("refreshBtn");
+    const refreshAllBtn = document.getElementById("refreshAllBtn");
     const deleteBtn = document.getElementById("deleteBtn");
     const selectedTitle = document.getElementById("selectedTitle");
     const selectedCode = document.getElementById("selectedCode");
@@ -1074,6 +1076,7 @@
     function setBusy(isBusy) {
       state.busy = isBusy;
       refreshBtn.disabled = isBusy;
+      refreshAllBtn.disabled = isBusy;
       deleteBtn.disabled = isBusy;
       addForm.querySelector("button").disabled = isBusy;
       stockEditSave.disabled = isBusy;
@@ -2258,6 +2261,30 @@
         renderStockList();
         renderSelected(stock);
         setStatus(`${stock.code} 数据已保存到本地`);
+      } catch (error) {
+        setStatus(error.message, true);
+      } finally {
+        setBusy(false);
+      }
+    });
+
+    refreshAllBtn.addEventListener("click", async () => {
+      if (!state.stocks.length) return;
+
+      try {
+        setBusy(true);
+        setStatus(`正在刷新全部 ${state.stocks.length} 只自选股和指数数据，可能需要几十秒...`);
+        const result = await api("/api/stocks/refresh-all", { method: "POST" });
+        state.stocks = result.stocks || state.stocks;
+        renderStockList();
+        if (state.selectedCode) {
+          await selectStock(state.selectedCode);
+        }
+
+        const failedCount = Number(result.failed_count || 0);
+        const updatedCount = Number(result.updated_count || 0);
+        const indexMessage = result.index_error ? "，指数刷新失败，已尽量使用缓存" : "，指数已刷新";
+        setStatus(`全部刷新完成：成功 ${updatedCount}/${result.total || state.stocks.length}，失败 ${failedCount}${indexMessage}`, failedCount > 0 || Boolean(result.index_error));
       } catch (error) {
         setStatus(error.message, true);
       } finally {
