@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import json
 import re
+import shutil
 import sys
 from datetime import datetime
 from http import HTTPStatus
@@ -19,6 +20,9 @@ HTML_FILE = ROOT / "baoding_return_bar_chart.html"
 DATA_DIR = ROOT / "data"
 STORE_PATH = DATA_DIR / "watchlist.json"
 UNIVERSE_PATH = DATA_DIR / "stock_universe.json"
+STOCK_DATA_DIR = DATA_DIR / "stocks"
+INDEX_DATA_PATH = DATA_DIR / "indices.json"
+LEGACY_BACKUP_PATH = DATA_DIR / "watchlist_legacy_backup.json"
 
 DEFAULT_STOCK = {"code": "002552", "name": "宝鼎科技", "group": ""}
 SERVER_CANDIDATES = [
@@ -42,11 +46,173 @@ def normalize_code(code: str) -> str:
     return clean
 
 
+def write_json_atomic(path: Path, payload: dict) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temp_path = path.with_suffix(f"{path.suffix}.tmp")
+    with temp_path.open("w", encoding="utf-8") as file:
+        json.dump(payload, file, ensure_ascii=False, separators=(",", ":"))
+    temp_path.replace(path)
+
+
+def stock_detail_path(code: str) -> Path:
+    return STOCK_DATA_DIR / f"{normalize_code(code)}.json"
+
+
+def stock_summary(stock: dict, detail: dict | None = None) -> dict:
+    source = detail or stock
+    rows = source.get("rows") or []
+    meta = source.get("meta") or {}
+    kline = source.get("kline") or []
+    last_return_pct = stock.get("last_return_pct")
+    last_return_date = stock.get("last_return_date")
+
+    valid_kline = []
+    for item in kline:
+        try:
+            close = float(item.get("close"))
+        except (TypeError, ValueError):
+            continue
+        if item.get("date") and close:
+            valid_kline.append({**item, "close": close})
+
+    if len(valid_kline) >= 2:
+        previous = valid_kline[-2]
+        latest = valid_kline[-1]
+        last_return_pct = round((float(latest["close"]) / float(previous["close"]) - 1) * 100, 2)
+        last_return_date = latest["date"]
+
+    row_count = len(rows) if rows else int(stock.get("row_count") or 0)
+    end_trade_date = meta.get("end_trade_date") or stock.get("end_trade_date")
+    end_close = meta.get("end_close", meta.get("end_close_qfq", stock.get("end_close")))
+
+    return {
+        "code": stock.get("code"),
+        "name": stock.get("name") or stock.get("code"),
+        "group": stock.get("group") or "",
+        "last_updated": stock.get("last_updated") or source.get("last_updated"),
+        "has_data": bool(rows) or bool(stock.get("has_data")),
+        "row_count": row_count,
+        "end_trade_date": end_trade_date,
+        "end_close": end_close,
+        "last_return_pct": last_return_pct,
+        "last_return_date": last_return_date,
+    }
+
+
+def stock_detail_from_summary(summary: dict) -> dict:
+    return {
+        "code": summary.get("code"),
+        "name": summary.get("name") or summary.get("code"),
+        "group": summary.get("group") or "",
+        "last_updated": summary.get("last_updated"),
+        "meta": None,
+        "rows": [],
+        "kline": [],
+    }
+
+
+def load_stock_detail(code: str, summary: dict | None = None) -> dict | None:
+    path = stock_detail_path(code)
+    if not path.exists():
+        return stock_detail_from_summary(summary or {"code": code})
+
+    with path.open("r", encoding="utf-8") as file:
+        detail = json.load(file)
+
+    if summary:
+        detail["code"] = summary.get("code")
+        detail["name"] = summary.get("name") or detail.get("name") or summary.get("code")
+        detail["group"] = summary.get("group") or ""
+        detail["last_updated"] = summary.get("last_updated") or detail.get("last_updated")
+    detail.setdefault("meta", None)
+    detail.setdefault("rows", [])
+    detail.setdefault("kline", [])
+    return detail
+
+
+def save_stock_detail(detail: dict) -> None:
+    code = normalize_code(detail.get("code"))
+    payload = {
+        "code": code,
+        "name": detail.get("name") or code,
+        "group": detail.get("group") or "",
+        "last_updated": detail.get("last_updated"),
+        "meta": detail.get("meta"),
+        "rows": detail.get("rows") or [],
+        "kline": detail.get("kline") or [],
+    }
+    write_json_atomic(stock_detail_path(code), payload)
+
+
+def load_indices() -> dict:
+    if not INDEX_DATA_PATH.exists():
+        return {}
+
+    with INDEX_DATA_PATH.open("r", encoding="utf-8") as file:
+        payload = json.load(file)
+    return payload.get("indices", payload) or {}
+
+
+def save_indices(indices: dict) -> None:
+    write_json_atomic(INDEX_DATA_PATH, {"last_updated": now_text(), "indices": indices or {}})
+
+
+def latest_index_date(indices: dict) -> str | None:
+    dates = []
+    for item in (indices or {}).values():
+        kline = item.get("kline") or []
+        if kline and kline[-1].get("date"):
+            dates.append(kline[-1]["date"])
+    return max(dates) if dates else None
+
+
+def store_needs_migration(store: dict) -> bool:
+    if store.get("version") != 2:
+        return True
+    return any(
+        any(key in stock for key in ("rows", "kline", "indices", "meta"))
+        for stock in store.get("stocks", [])
+    )
+
+
+def migrate_legacy_store(store: dict) -> dict:
+    if STORE_PATH.exists() and not LEGACY_BACKUP_PATH.exists():
+        shutil.copy2(STORE_PATH, LEGACY_BACKUP_PATH)
+
+    summaries = []
+    migrated_indices = load_indices()
+    for stock in store.get("stocks", []):
+        code = normalize_code(stock.get("code"))
+        stock["code"] = code
+
+        if stock.get("indices") and not migrated_indices:
+            migrated_indices = stock.get("indices") or {}
+
+        detail = {
+            "code": code,
+            "name": stock.get("name") or code,
+            "group": stock.get("group") or "",
+            "last_updated": stock.get("last_updated"),
+            "meta": stock.get("meta"),
+            "rows": stock.get("rows") or [],
+            "kline": stock.get("kline") or [],
+        }
+        if detail["rows"] or detail["kline"] or detail["meta"]:
+            save_stock_detail(detail)
+        summaries.append(stock_summary(stock, detail))
+
+    if migrated_indices:
+        save_indices(migrated_indices)
+
+    return {"version": 2, "stocks": summaries}
+
+
 def load_store() -> dict:
     DATA_DIR.mkdir(exist_ok=True)
+    STOCK_DATA_DIR.mkdir(exist_ok=True)
 
     if not STORE_PATH.exists():
-        store = {"stocks": [{**DEFAULT_STOCK, "last_updated": None, "meta": None, "rows": []}]}
+        store = {"version": 2, "stocks": [stock_summary({**DEFAULT_STOCK, "last_updated": None})]}
         save_store(store)
         return store
 
@@ -54,14 +220,25 @@ def load_store() -> dict:
         store = json.load(file)
 
     store.setdefault("stocks", [])
+    if store_needs_migration(store):
+        store = migrate_legacy_store(store)
+        save_store(store)
+        return store
+
     changed = False
+    summaries = []
     for stock in store["stocks"]:
         if "group" not in stock:
             stock["group"] = ""
             changed = True
+        summary = stock_summary(stock)
+        summaries.append(summary)
+        if summary != stock:
+            changed = True
+    store["stocks"] = summaries
 
     if not any(stock.get("code") == DEFAULT_STOCK["code"] for stock in store["stocks"]):
-        store["stocks"].insert(0, {**DEFAULT_STOCK, "last_updated": None, "meta": None, "rows": []})
+        store["stocks"].insert(0, stock_summary({**DEFAULT_STOCK, "last_updated": None}))
         changed = True
 
     if changed:
@@ -71,46 +248,22 @@ def load_store() -> dict:
 
 
 def save_store(store: dict) -> None:
-    DATA_DIR.mkdir(exist_ok=True)
-    temp_path = STORE_PATH.with_suffix(".json.tmp")
-    with temp_path.open("w", encoding="utf-8") as file:
-        json.dump(store, file, ensure_ascii=False, indent=2)
-    temp_path.replace(STORE_PATH)
-
-
-def stock_summary(stock: dict) -> dict:
-    rows = stock.get("rows") or []
-    meta = stock.get("meta") or {}
-    kline = stock.get("kline") or []
-    valid_kline = [
-        item
-        for item in kline
-        if item.get("date") and isinstance(item.get("close"), int | float) and item.get("close")
-    ]
-    last_return_pct = None
-    last_return_date = None
-    if len(valid_kline) >= 2:
-        previous = valid_kline[-2]
-        latest = valid_kline[-1]
-        last_return_pct = round((float(latest["close"]) / float(previous["close"]) - 1) * 100, 2)
-        last_return_date = latest["date"]
-
-    return {
-        "code": stock.get("code"),
-        "name": stock.get("name") or stock.get("code"),
-        "group": stock.get("group") or "",
-        "last_updated": stock.get("last_updated"),
-        "has_data": bool(rows),
-        "row_count": len(rows),
-        "end_trade_date": meta.get("end_trade_date"),
-        "end_close": meta.get("end_close", meta.get("end_close_qfq")),
-        "last_return_pct": last_return_pct,
-        "last_return_date": last_return_date,
+    payload = {
+        "version": 2,
+        "stocks": [stock_summary(stock) for stock in store.get("stocks", [])],
     }
+    write_json_atomic(STORE_PATH, payload)
 
 
 def get_stock(store: dict, code: str) -> dict | None:
     return next((stock for stock in store["stocks"] if stock.get("code") == code), None)
+
+
+def stock_response(summary: dict) -> dict:
+    detail = load_stock_detail(summary.get("code"), summary)
+    detail.update(summary)
+    detail["indices"] = load_indices()
+    return detail
 
 
 def connect_quotes_client():
@@ -352,6 +505,18 @@ def fetch_index_klines(client) -> dict:
     return result
 
 
+def get_index_klines(client, stock_end_date: str) -> dict:
+    cached = load_indices()
+    cached_latest = latest_index_date(cached)
+    if cached and cached_latest and cached_latest >= stock_end_date:
+        return cached
+
+    indices = fetch_index_klines(client)
+    if indices:
+        save_indices(indices)
+    return indices
+
+
 def calculate_returns(symbol: str) -> dict:
     client, server, raw = connect_client(symbol)
     prices = raw.sort_index().copy()
@@ -436,7 +601,7 @@ def calculate_returns(symbol: str) -> dict:
     return {
         "rows": rows,
         "kline": kline,
-        "indices": fetch_index_klines(client),
+        "indices": get_index_klines(client, latest_dt.date().isoformat()),
         "meta": {
             "symbol": symbol,
             "server": f"{server[0]}:{server[1]}",
@@ -467,7 +632,7 @@ class StockAppHandler(SimpleHTTPRequestHandler):
 
         if path == "/api/stocks":
             store = load_store()
-            self.send_json({"stocks": [stock_summary(stock) for stock in store["stocks"]]})
+            self.send_json({"stocks": store["stocks"]})
             return
 
         if path == "/api/search":
@@ -491,7 +656,7 @@ class StockAppHandler(SimpleHTTPRequestHandler):
             if stock is None:
                 self.send_error_json(HTTPStatus.NOT_FOUND, "未找到该股票")
                 return
-            self.send_json(stock)
+            self.send_json(stock_response(stock))
             return
 
         self.send_error(HTTPStatus.NOT_FOUND)
@@ -545,7 +710,8 @@ class StockAppHandler(SimpleHTTPRequestHandler):
             return
 
         save_store(store)
-        self.send_json({"stocks": [stock_summary(stock) for stock in store["stocks"]]})
+        stock_detail_path(code).unlink(missing_ok=True)
+        self.send_json({"stocks": store["stocks"]})
 
     def add_stock(self) -> None:
         body = self.read_json()
@@ -564,13 +730,18 @@ class StockAppHandler(SimpleHTTPRequestHandler):
         stock = get_stock(store, code)
 
         if stock is None:
-            stock = {"code": code, "name": name, "group": "", "last_updated": None, "meta": None, "rows": []}
+            stock = stock_summary({"code": code, "name": name, "group": "", "last_updated": None})
             store["stocks"].append(stock)
         else:
             stock["name"] = name
+            detail_path = stock_detail_path(code)
+            if detail_path.exists():
+                detail = load_stock_detail(code, stock)
+                detail["name"] = name
+                save_stock_detail(detail)
 
         save_store(store)
-        self.send_json({"stock": stock_summary(stock), "stocks": [stock_summary(item) for item in store["stocks"]]})
+        self.send_json({"stock": stock_summary(stock), "stocks": store["stocks"]})
 
     def update_stock_info(self, code: str) -> None:
         body = self.read_json()
@@ -583,16 +754,21 @@ class StockAppHandler(SimpleHTTPRequestHandler):
 
         group = str(body.get("group") or "").strip()[:32]
         stock["group"] = group
+        detail_path = stock_detail_path(code)
+        if detail_path.exists():
+            detail = load_stock_detail(code, stock)
+            detail["group"] = group
+            save_stock_detail(detail)
 
         save_store(store)
-        self.send_json({"stock": stock, "stocks": [stock_summary(item) for item in store["stocks"]]})
+        self.send_json({"stock": stock_summary(stock), "stocks": store["stocks"]})
 
     def refresh_stock(self, code: str) -> None:
         store = load_store()
         stock = get_stock(store, code)
 
         if stock is None:
-            stock = {"code": code, "name": code, "group": "", "last_updated": None, "meta": None, "rows": []}
+            stock = stock_summary({"code": code, "name": code, "group": "", "last_updated": None})
             store["stocks"].append(stock)
 
         try:
@@ -601,13 +777,23 @@ class StockAppHandler(SimpleHTTPRequestHandler):
             self.send_error_json(HTTPStatus.BAD_GATEWAY, f"获取行情失败：{exc}")
             return
 
-        stock["rows"] = result["rows"]
-        stock["kline"] = result["kline"]
-        stock["indices"] = result["indices"]
-        stock["meta"] = result["meta"]
-        stock["last_updated"] = now_text()
+        last_updated = now_text()
+        detail = {
+            "code": code,
+            "name": stock.get("name") or code,
+            "group": stock.get("group") or "",
+            "rows": result["rows"],
+            "kline": result["kline"],
+            "meta": result["meta"],
+            "last_updated": last_updated,
+        }
+        stock.update(stock_summary(stock, detail))
+        save_stock_detail(detail)
         save_store(store)
-        self.send_json(stock)
+        detail.update(stock)
+        detail["indices"] = result["indices"]
+        detail["stocks"] = store["stocks"]
+        self.send_json(detail)
 
     def read_json(self) -> dict:
         length = int(self.headers.get("Content-Length") or 0)

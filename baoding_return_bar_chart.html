@@ -1267,7 +1267,11 @@
         });
         state.stocks = result.stocks || state.stocks;
         closeStockEdit();
-        await loadStocks(code);
+        if (state.selectedStock?.code === code) {
+          state.selectedStock = { ...state.selectedStock, ...(result.stock || {}) };
+          renderSelected(state.selectedStock);
+        }
+        renderStockList();
         setStatus("个股信息已保存");
       } catch (error) {
         setStatus(error.message, true);
@@ -2186,7 +2190,9 @@
         addForm.reset();
         state.selectedCandidate = null;
         hideCandidates();
-        await loadStocks(result.stock.code);
+        state.stocks = result.stocks || state.stocks;
+        renderStockList();
+        await selectStock(result.stock.code);
         setStatus("已添加自选股");
       } catch (error) {
         if (error.payload?.candidates?.length) {
@@ -2248,7 +2254,9 @@
         setStatus(`正在获取 ${state.selectedCode} 的 mootdx 数据...`);
         const stock = await api(`/api/stocks/${state.selectedCode}/refresh`, { method: "POST" });
         state.selectedStock = stock;
-        await loadStocks(state.selectedCode);
+        state.stocks = stock.stocks || state.stocks;
+        renderStockList();
+        renderSelected(stock);
         setStatus(`${stock.code} 数据已保存到本地`);
       } catch (error) {
         setStatus(error.message, true);
