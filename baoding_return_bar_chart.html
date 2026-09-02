@@ -256,6 +256,57 @@
       font-weight: 800;
     }
 
+    .stock-browser {
+      display: grid;
+      grid-template-rows: auto minmax(0, 1fr);
+      min-height: 0;
+      overflow: hidden;
+    }
+
+    .stock-filters {
+      display: grid;
+      grid-template-columns: minmax(0, 0.85fr) minmax(0, 1.15fr);
+      gap: 8px;
+      padding: 10px;
+      border-bottom: 1px solid var(--line);
+      background: #fff;
+    }
+
+    .stock-filter-field {
+      display: grid;
+      gap: 4px;
+      min-width: 0;
+    }
+
+    .stock-filter-field label {
+      font-size: 11px;
+    }
+
+    .stock-filter-field input,
+    .stock-filter-field select {
+      width: 100%;
+      min-width: 0;
+      height: 34px;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      background: #fff;
+      color: var(--text);
+      padding: 0 8px;
+      font: inherit;
+      font-size: 12px;
+    }
+
+    .stock-filter-field select {
+      cursor: pointer;
+    }
+
+    .stock-filter-field input:focus,
+    .stock-filter-field select:focus {
+      border-color: var(--teal);
+      box-shadow: 0 0 0 3px rgba(15, 118, 110, 0.14);
+      outline: none;
+    }
+
     .stock-list {
       display: block;
       height: 100%;
@@ -281,6 +332,13 @@
 
     .stock-list::-webkit-scrollbar-track {
       background: #f8fafc;
+    }
+
+    .stock-filter-empty {
+      padding: 22px 12px;
+      color: var(--muted);
+      font-size: 13px;
+      text-align: center;
     }
 
     .stock-group-section {
@@ -882,6 +940,10 @@
         overflow-y: auto;
       }
 
+      .stock-browser {
+        display: block;
+      }
+
       input {
         width: min(46vw, 170px);
       }
@@ -945,7 +1007,21 @@
           <span>自选股票</span>
           <span id="stockCount" class="pill">0</span>
         </div>
-        <div id="stockList" class="stock-list"></div>
+        <div class="stock-browser">
+          <div class="stock-filters">
+            <div class="stock-filter-field">
+              <label for="groupFilter">分组</label>
+              <select id="groupFilter" aria-label="按分组筛选">
+                <option value="">全部分组</option>
+              </select>
+            </div>
+            <div class="stock-filter-field">
+              <label for="watchlistFilter">个股</label>
+              <input id="watchlistFilter" type="search" maxlength="32" placeholder="名称或代码" autocomplete="off">
+            </div>
+          </div>
+          <div id="stockList" class="stock-list"></div>
+        </div>
       </aside>
 
       <section class="content">
@@ -1034,11 +1110,15 @@
       selectedCandidate: null,
       searchTimer: null,
       klineSelection: [],
-      editingStockCode: null
+      editingStockCode: null,
+      groupFilter: "",
+      watchlistQuery: ""
     };
 
     const stockList = document.getElementById("stockList");
     const stockCount = document.getElementById("stockCount");
+    const groupFilter = document.getElementById("groupFilter");
+    const watchlistFilter = document.getElementById("watchlistFilter");
     const addForm = document.getElementById("addForm");
     const stockSearch = document.getElementById("stockSearch");
     const searchResults = document.getElementById("searchResults");
@@ -1164,10 +1244,19 @@
     }
 
     function renderStockList() {
-      stockCount.textContent = String(state.stocks.length);
+      renderGroupFilterOptions();
+      const filteredStocks = filterWatchlistStocks(state.stocks);
+      stockCount.textContent = filteredStocks.length === state.stocks.length
+        ? String(state.stocks.length)
+        : `${filteredStocks.length}/${state.stocks.length}`;
       stockList.innerHTML = "";
 
-      const groups = groupStocks(state.stocks);
+      if (!filteredStocks.length) {
+        stockList.innerHTML = '<div class="stock-filter-empty">没有匹配的自选股</div>';
+        return;
+      }
+
+      const groups = groupStocks(filteredStocks);
       for (const group of groups) {
         const section = document.createElement("section");
         section.className = "stock-group-section";
@@ -1189,10 +1278,44 @@
       }
     }
 
+    function stockGroupName(stock) {
+      return String(stock.group || "").trim() || "未分组";
+    }
+
+    function renderGroupFilterOptions() {
+      const groups = groupStocks(state.stocks).map(group => group.name);
+      if (state.groupFilter && !groups.includes(state.groupFilter)) {
+        state.groupFilter = "";
+      }
+
+      groupFilter.innerHTML = [
+        '<option value="">全部分组</option>',
+        ...groups.map(name => `<option value="${escapeHtml(name)}">${escapeHtml(name)}</option>`)
+      ].join("");
+      groupFilter.value = state.groupFilter;
+    }
+
+    function filterWatchlistStocks(stocks) {
+      const query = state.watchlistQuery.replace(/\s+/g, "").toLowerCase();
+      return stocks.filter(stock => {
+        if (state.groupFilter && stockGroupName(stock) !== state.groupFilter) {
+          return false;
+        }
+        if (!query) {
+          return true;
+        }
+
+        const searchable = `${stockLabel(stock)}${stock.code || ""}`
+          .replace(/\s+/g, "")
+          .toLowerCase();
+        return searchable.includes(query);
+      });
+    }
+
     function groupStocks(stocks) {
       const groups = new Map();
       for (const stock of stocks) {
-        const name = String(stock.group || "").trim() || "未分组";
+        const name = stockGroupName(stock);
         if (!groups.has(name)) {
           groups.set(name, []);
         }
@@ -1362,6 +1485,7 @@
       const endClose = meta.end_close ?? meta.end_close_qfq;
       if (endClose) parts.push(`<span class="pill">收盘 ${Number(endClose).toFixed(2)}</span>`);
       if (meta.adjust) parts.push(`<span class="pill">${meta.adjust === "none" ? "未复权" : escapeHtml(meta.adjust.toUpperCase())}</span>`);
+      if (meta.data_source) parts.push(`<span class="pill">来源 ${escapeHtml(meta.data_source)}</span>`);
       selectedMeta.innerHTML = parts.join("");
 
       const rows = stock.rows || [];
@@ -2150,6 +2274,7 @@
       const changePct = changePctOverride ?? event.target.dataset.changePct;
       const changeText = changePct !== null && changePct !== undefined && changePct !== "" ? `${changePct}%` : "-";
       const heading = title ? `${title} ${item.date}` : item.date;
+      const amountLabel = item.amount_estimated ? "成交额（估算）" : "成交额";
       tooltip.innerHTML = `
         <strong>${escapeHtml(heading)}</strong>
         开盘：${formatPrice(item.open)}<br>
@@ -2158,7 +2283,7 @@
         收盘：${formatPrice(item.close)}<br>
         涨跌幅：${changeText}<br>
         成交量：${formatVolume(item.volume)}<br>
-        成交额：${formatAmount(item.amount)}
+        ${amountLabel}：${formatAmount(item.amount)}
       `;
       tooltip.style.display = "block";
       const x = event.clientX || event.target.getBoundingClientRect().left;
@@ -2209,6 +2334,16 @@
       }
     });
 
+    watchlistFilter.addEventListener("input", () => {
+      state.watchlistQuery = watchlistFilter.value.trim();
+      renderStockList();
+    });
+
+    groupFilter.addEventListener("change", () => {
+      state.groupFilter = groupFilter.value;
+      renderStockList();
+    });
+
     stockSearch.addEventListener("input", () => {
       window.clearTimeout(state.searchTimer);
       state.selectedCandidate = null;
@@ -2254,13 +2389,13 @@
 
       try {
         setBusy(true);
-        setStatus(`正在获取 ${state.selectedCode} 的 mootdx 数据...`);
+        setStatus(`正在获取 ${state.selectedCode} 的行情数据...`);
         const stock = await api(`/api/stocks/${state.selectedCode}/refresh`, { method: "POST" });
         state.selectedStock = stock;
         state.stocks = stock.stocks || state.stocks;
         renderStockList();
         renderSelected(stock);
-        setStatus(`${stock.code} 数据已保存到本地`);
+        setStatus(`${stock.code} 数据已保存到本地${stock.meta?.data_source ? `（${stock.meta.data_source}）` : ""}`);
       } catch (error) {
         setStatus(error.message, true);
       } finally {
@@ -2283,8 +2418,13 @@
 
         const failedCount = Number(result.failed_count || 0);
         const updatedCount = Number(result.updated_count || 0);
-        const indexMessage = result.index_error ? "，指数刷新失败，已尽量使用缓存" : "，指数已刷新";
-        setStatus(`全部刷新完成：成功 ${updatedCount}/${result.total || state.stocks.length}，失败 ${failedCount}${indexMessage}`, failedCount > 0 || Boolean(result.index_error));
+        const usedBackupSource = String(result.index_error || "").includes("已切换腾讯财经");
+        const indexMessage = usedBackupSource
+          ? "，已切换腾讯财经备用源"
+          : result.index_error
+            ? "，指数刷新失败，已尽量使用缓存"
+            : "，指数已刷新";
+        setStatus(`全部刷新完成：成功 ${updatedCount}/${result.total || state.stocks.length}，失败 ${failedCount}${indexMessage}`, failedCount > 0 || (Boolean(result.index_error) && !usedBackupSource));
       } catch (error) {
         setStatus(error.message, true);
       } finally {

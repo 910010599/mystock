@@ -9,7 +9,8 @@ from datetime import datetime
 from http import HTTPStatus
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from urllib.parse import parse_qs, unquote, urlparse
+from urllib.parse import parse_qs, unquote, urlencode, urlparse
+from urllib.request import Request, urlopen
 
 import pandas as pd
 from mootdx.quotes import Quotes
@@ -33,6 +34,11 @@ SERVER_CANDIDATES = [
     ("121.36.54.217", 7709),
     ("124.71.85.110", 7709),
 ]
+TENCENT_KLINE_URL = "https://web.ifzq.gtimg.cn/appstock/app/fqkline/get"
+TENCENT_INDEXES = {
+    "sh": {"code": "000001", "name": "上证指数", "market": "sh"},
+    "sz": {"code": "399001", "name": "深证成指", "market": "sz"},
+}
 
 
 def now_text() -> str:
@@ -471,18 +477,97 @@ def frame_to_kline(frame: pd.DataFrame) -> list[dict]:
     for trade_dt, item in prices.iterrows():
         volume_value = item.get("volume", item.get("vol", 0))
         amount_value = item.get("amount", 0)
-        kline.append(
+        entry = {
+            "date": trade_dt.date().isoformat(),
+            "open": round(float(item["open"]), 4),
+            "high": round(float(item["high"]), 4),
+            "low": round(float(item["low"]), 4),
+            "close": round(float(item["close"]), 4),
+            "volume": round(float(volume_value or 0), 4),
+            "amount": round(float(amount_value or 0), 4),
+        }
+        if bool(item.get("amount_estimated", False)):
+            entry["amount_estimated"] = True
+        kline.append(entry)
+    return kline
+
+
+def tencent_symbol(symbol: str, market: str | None = None) -> str:
+    code = normalize_code(symbol)
+    prefix = market or ("sh" if preferred_market_for_code(code) == 1 else "sz")
+    return f"{prefix}{code}"
+
+
+def fetch_tencent_daily_kline(
+    symbol: str,
+    *,
+    market: str | None = None,
+    estimate_amount: bool = False,
+) -> list[dict]:
+    provider_symbol = tencent_symbol(symbol, market)
+    params = {
+        "_var": "kline_day",
+        "param": f"{provider_symbol},day,,,800,",
+        "r": "0.314159",
+    }
+    request = Request(
+        f"{TENCENT_KLINE_URL}?{urlencode(params)}",
+        headers={"User-Agent": "Mozilla/5.0", "Referer": "https://gu.qq.com/"},
+    )
+    with urlopen(request, timeout=15) as response:
+        content = response.read().decode("utf-8")
+
+    try:
+        payload = json.loads(content.split("=", 1)[1])
+    except (IndexError, json.JSONDecodeError) as exc:
+        raise RuntimeError("腾讯财经返回了无法解析的 K 线数据") from exc
+
+    source_rows = ((payload.get("data") or {}).get(provider_symbol) or {}).get("day") or []
+    if not source_rows:
+        message = payload.get("msg") or "腾讯财经未返回 K 线数据"
+        raise RuntimeError(str(message))
+
+    result = []
+    for row in source_rows:
+        try:
+            trade_date, open_price, close_price, high_price, low_price, volume = row[:6]
+            open_value = float(open_price)
+            close_value = float(close_price)
+            high_value = float(high_price)
+            low_value = float(low_price)
+            volume_value = float(volume)
+        except (TypeError, ValueError, IndexError) as exc:
+            raise RuntimeError("腾讯财经返回了无效的 K 线字段") from exc
+
+        amount_value = 0.0
+        if estimate_amount:
+            typical_price = (high_value + low_value + close_value) / 3
+            amount_value = typical_price * volume_value * 100
+
+        result.append(
             {
-                "date": trade_dt.date().isoformat(),
-                "open": round(float(item["open"]), 4),
-                "high": round(float(item["high"]), 4),
-                "low": round(float(item["low"]), 4),
-                "close": round(float(item["close"]), 4),
-                "volume": round(float(volume_value or 0), 4),
-                "amount": round(float(amount_value or 0), 4),
+                "date": trade_date,
+                "open": open_value,
+                "high": high_value,
+                "low": low_value,
+                "close": close_value,
+                "volume": volume_value,
+                "amount": amount_value,
+                "amount_estimated": estimate_amount,
             }
         )
-    return kline
+    return result
+
+
+def fetch_tencent_index_klines() -> dict:
+    return {
+        key: {
+            "code": info["code"],
+            "name": info["name"],
+            "kline": fetch_tencent_daily_kline(info["code"], market=info["market"]),
+        }
+        for key, info in TENCENT_INDEXES.items()
+    }
 
 
 def fetch_index_klines(client) -> dict:
@@ -505,6 +590,13 @@ def fetch_index_klines(client) -> dict:
     return result
 
 
+def has_index_klines(indices: dict | None) -> bool:
+    return any(
+        isinstance(item, dict) and bool(item.get("kline"))
+        for item in (indices or {}).values()
+    )
+
+
 def get_index_klines(client, stock_end_date: str) -> dict:
     cached = load_indices()
     cached_latest = latest_index_date(cached)
@@ -512,13 +604,20 @@ def get_index_klines(client, stock_end_date: str) -> dict:
         return cached
 
     indices = fetch_index_klines(client)
-    if indices:
+    if has_index_klines(indices):
         save_indices(indices)
     return indices
 
 
-def calculate_returns(symbol: str, indices: dict | None = None) -> dict:
-    client, server, raw = connect_client(symbol)
+def build_returns_result(
+    symbol: str,
+    raw: pd.DataFrame,
+    indices: dict,
+    *,
+    data_source: str,
+    server: tuple[str, int] | None = None,
+    quote: dict | None = None,
+) -> dict:
     prices = raw.sort_index().copy()
     for column in ("open", "high", "low", "close"):
         prices[column] = prices[column].astype(float)
@@ -585,6 +684,44 @@ def calculate_returns(symbol: str, indices: dict | None = None) -> dict:
             candidates=candidates,
         )
 
+    return {
+        "rows": rows,
+        "kline": kline,
+        "indices": indices,
+        "meta": {
+            "symbol": symbol,
+            "server": f"{server[0]}:{server[1]}" if server else None,
+            "data_source": data_source,
+            "raw_start_date": prices.index[0].date().isoformat(),
+            "raw_end_date": prices.index[-1].date().isoformat(),
+            "raw_rows": int(len(prices)),
+            "end_trade_date": latest_dt.date().isoformat(),
+            "end_close": round(latest_close, 4),
+            "quote": quote,
+            "adjust": "none",
+        },
+    }
+
+
+def calculate_returns(
+    symbol: str,
+    indices: dict | None = None,
+    client=None,
+    server=None,
+    raw: pd.DataFrame | None = None,
+) -> dict:
+    if raw is None:
+        if client is None:
+            client, server, raw = connect_client(symbol)
+        else:
+            raw = client.bars(symbol=symbol, frequency=9, offset=800)
+            if raw is None or raw.empty:
+                raise RuntimeError(f"行情服务器未返回 {symbol} 的数据")
+
+    prices = raw.sort_index()
+    if prices.empty:
+        raise RuntimeError(f"行情服务器未返回 {symbol} 的数据")
+    resolved_indices = indices or get_index_klines(client, prices.index[-1].date().isoformat())
     quote = None
     try:
         quote_df = client.quotes(symbol=[symbol])
@@ -598,22 +735,27 @@ def calculate_returns(symbol: str, indices: dict | None = None) -> dict:
     except Exception:
         quote = None
 
-    return {
-        "rows": rows,
-        "kline": kline,
-        "indices": indices if indices is not None else get_index_klines(client, latest_dt.date().isoformat()),
-        "meta": {
-            "symbol": symbol,
-            "server": f"{server[0]}:{server[1]}",
-            "raw_start_date": prices.index[0].date().isoformat(),
-            "raw_end_date": prices.index[-1].date().isoformat(),
-            "raw_rows": int(len(prices)),
-            "end_trade_date": latest_dt.date().isoformat(),
-            "end_close": round(latest_close, 4),
-            "quote": quote,
-            "adjust": "none",
-        },
-    }
+    return build_returns_result(
+        symbol,
+        prices,
+        resolved_indices,
+        data_source="mootdx",
+        server=server,
+        quote=quote,
+    )
+
+
+def calculate_tencent_returns(symbol: str, indices: dict | None = None) -> dict:
+    kline = fetch_tencent_daily_kline(symbol, estimate_amount=True)
+    prices = pd.DataFrame(kline)
+    prices.index = pd.to_datetime(prices.pop("date"))
+    resolved_indices = indices or fetch_tencent_index_klines()
+    return build_returns_result(
+        symbol,
+        prices,
+        resolved_indices,
+        data_source="腾讯财经（备用）",
+    )
 
 
 class StockAppHandler(SimpleHTTPRequestHandler):
@@ -777,9 +919,15 @@ class StockAppHandler(SimpleHTTPRequestHandler):
 
         try:
             result = calculate_returns(code)
-        except Exception as exc:  # noqa: BLE001 - send readable API error.
-            self.send_error_json(HTTPStatus.BAD_GATEWAY, f"获取行情失败：{exc}")
-            return
+        except Exception as mootdx_error:  # noqa: BLE001 - use the HTTP backup source.
+            try:
+                result = calculate_tencent_returns(code)
+            except Exception as tencent_error:  # noqa: BLE001 - send readable API error.
+                self.send_error_json(
+                    HTTPStatus.BAD_GATEWAY,
+                    f"获取行情失败：mootdx={mootdx_error}; 腾讯财经={tencent_error}",
+                )
+                return
 
         detail = self.persist_refresh_result(stock, result)
         save_store(store)
@@ -795,26 +943,70 @@ class StockAppHandler(SimpleHTTPRequestHandler):
         failed = []
         indices = None
         index_error = None
+        client = None
+        server = None
+        source = "mootdx"
 
         try:
-            client, _server = connect_quotes_client()
+            client, server = connect_quotes_client()
             indices = fetch_index_klines(client)
+            if not has_index_klines(indices):
+                raise RuntimeError("行情服务器未返回指数 K 线")
             save_indices(indices)
-        except Exception as exc:  # noqa: BLE001 - keep stock refresh attempts useful.
-            index_error = str(exc)
-            indices = load_indices()
+        except Exception as mootdx_error:  # noqa: BLE001 - switch the whole batch to HTTP backup.
+            client = None
+            server = None
+            try:
+                indices = fetch_tencent_index_klines()
+                save_indices(indices)
+                source = "tencent"
+                index_error = f"mootdx 不可用，已切换腾讯财经：{mootdx_error}"
+            except Exception as tencent_error:  # noqa: BLE001 - retain existing cache when both fail.
+                index_error = f"mootdx={mootdx_error}; 腾讯财经={tencent_error}"
+                indices = load_indices()
 
         shared_indices = indices or None
         for stock in stocks:
             code = stock.get("code")
             try:
-                result = calculate_returns(code, indices=shared_indices)
+                if source == "tencent":
+                    result = calculate_tencent_returns(code, indices=shared_indices)
+                else:
+                    if client is None:
+                        client, server, raw = connect_client(code)
+                    else:
+                        raw = client.bars(symbol=code, frequency=9, offset=800)
+                        if raw is None or raw.empty:
+                            raise RuntimeError(f"行情服务器未返回 {code} 的数据")
+
+                    result = calculate_returns(
+                        code,
+                        indices=shared_indices,
+                        client=client,
+                        server=server,
+                        raw=raw,
+                    )
                 if shared_indices is None and result.get("indices"):
                     shared_indices = result["indices"]
-                self.persist_refresh_result(stock, result)
-                refreshed.append({"code": code, "name": stock.get("name")})
-            except Exception as exc:  # noqa: BLE001 - report per-stock failures.
-                failed.append({"code": code, "name": stock.get("name"), "error": str(exc)})
+            except Exception:  # noqa: BLE001 - retry once with the backup source.
+                client = None
+                server = None
+                try:
+                    result = calculate_tencent_returns(code, indices=shared_indices)
+                    if shared_indices is None and result.get("indices"):
+                        shared_indices = result["indices"]
+                except Exception as retry_exc:  # noqa: BLE001 - report per-stock failures.
+                    failed.append(
+                        {
+                            "code": code,
+                            "name": stock.get("name"),
+                            "error": str(retry_exc),
+                        }
+                    )
+                    continue
+
+            self.persist_refresh_result(stock, result)
+            refreshed.append({"code": code, "name": stock.get("name")})
 
         save_store(store)
         self.send_json(
